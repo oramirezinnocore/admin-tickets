@@ -132,12 +132,6 @@ export default function DashboardPage() {
         .select('id')
         .eq('is_active', true);
 
-      const { data: locationsData } = await supabase
-        .from('technician_latest_locations')
-        .select('technician_id');
-
-      const activeTechs = techsData?.length || 0;
-
       // Check recent locations (last 10 minutes)
       const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000);
       const { data: recentLocs } = await supabase
@@ -145,6 +139,7 @@ export default function DashboardPage() {
         .select('technician_id')
         .gte('recorded_at', tenMinutesAgo.toISOString());
 
+      const activeTechs = techsData?.length || 0;
       const techsWithLocation =
         new Set(recentLocs?.map(l => l.technician_id)).size || 0;
 
@@ -189,10 +184,7 @@ export default function DashboardPage() {
     })
     .slice(0, 10);
 
-  // Calculate alerts
-  const now = new Date();
-  const fourHoursAgo = new Date(now.getTime() - 4 * 60 * 60 * 1000);
-
+  // Calculate alerts - FIXED: unique keys
   const activeTickets = tickets.filter(t => t.status !== 'RESOLVED' && t.status !== 'CANCELLED');
 
   const overdueTickets = activeTickets.filter(
@@ -207,17 +199,11 @@ export default function DashboardPage() {
 
   const techsWithoutLocation = stats.activeTechs - stats.techsWithLocation;
 
-  const longInReviewTickets = tickets.filter(
-    t =>
-      t.status === 'IN_REVIEW' &&
-      t.started_at &&
-      new Date(t.started_at) < fourHoursAgo
-  );
-
   const alerts = [
     ...(overdueTickets.length > 0
       ? [{
           type: 'critical' as const,
+          key: 'overdue',
           message: `${overdueTickets.length} ticket${overdueTickets.length > 1 ? 's' : ''} vencido${overdueTickets.length > 1 ? 's' : ''}`,
           action: () => router.push('/tickets'),
         }]
@@ -225,13 +211,15 @@ export default function DashboardPage() {
     ...(redTickets.length > 0
       ? [{
           type: 'warning' as const,
-          message: `${redTickets.length} ticket${redTickets.length > 1 ? 's' : ''} en estado rojo (48-72h)`,
+          key: 'red',
+          message: `${redTickets.length} ticket${redTickets.length > 1 ? 's' : ''} próximo${redTickets.length > 1 ? 's' : ''} a vencer`,
           action: () => router.push('/tickets'),
         }]
       : []),
     ...(unassignedTickets.length > 0
       ? [{
           type: 'info' as const,
+          key: 'unassigned',
           message: `${unassignedTickets.length} ticket${unassignedTickets.length > 1 ? 's' : ''} sin asignar`,
           action: () => router.push('/tickets'),
         }]
@@ -239,15 +227,9 @@ export default function DashboardPage() {
     ...(techsWithoutLocation > 0
       ? [{
           type: 'info' as const,
+          key: 'location',
           message: `${techsWithoutLocation} técnico${techsWithoutLocation > 1 ? 's' : ''} sin ubicación reciente`,
           action: () => router.push('/map'),
-        }]
-      : []),
-    ...(longInReviewTickets.length > 0
-      ? [{
-          type: 'warning' as const,
-          message: `${longInReviewTickets.length} ticket${longInReviewTickets.length > 1 ? 's' : ''} en revisión por más de 4 horas`,
-          action: () => router.push('/tickets'),
         }]
       : []),
   ];
@@ -256,7 +238,7 @@ export default function DashboardPage() {
     return (
       <ProtectedLayout>
         <div className="flex items-center justify-center py-12">
-          <div className="text-gray-600">Cargando dashboard...</div>
+          <div className="text-gray-600">Cargando...</div>
         </div>
       </ProtectedLayout>
     );
@@ -264,120 +246,137 @@ export default function DashboardPage() {
 
   return (
     <ProtectedLayout>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Dashboard Operativo</h1>
-        <button
-          onClick={loadData}
-          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
-        >
-          Actualizar
-        </button>
+      {/* Header */}
+      <div className="mb-8">
+        <div className="flex items-center justify-between mb-2">
+          <h1 className="text-3xl font-bold text-gray-900">Panel operativo</h1>
+          <button
+            onClick={loadData}
+            className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors font-medium"
+            title="Actualizar datos"
+          >
+            ↻ Actualizar
+          </button>
+        </div>
+        <p className="text-sm text-gray-600">Resumen en tiempo real de la operación de soporte</p>
       </div>
 
-      {/* Alerts */}
+      {/* Alerts - FIXED: using unique keys */}
       {alerts.length > 0 && (
-        <div className="mb-6 space-y-2">
-          {alerts.map((alert, index) => (
-            <div
-              key={index}
-              onClick={alert.action}
-              className={`p-4 rounded-lg border-l-4 cursor-pointer hover:shadow-md transition ${
-                alert.type === 'critical'
-                  ? 'bg-red-50 border-red-500'
-                  : alert.type === 'warning'
-                  ? 'bg-yellow-50 border-yellow-500'
-                  : 'bg-blue-50 border-blue-500'
-              }`}
-            >
-              <p
-                className={`font-medium ${
-                  alert.type === 'critical'
-                    ? 'text-red-800'
-                    : alert.type === 'warning'
-                    ? 'text-yellow-800'
-                    : 'text-blue-800'
-                }`}
-              >
-                {alert.type === 'critical' ? '🚨' : alert.type === 'warning' ? '⚠️' : 'ℹ️'}{' '}
-                {alert.message}
-              </p>
+        <div className="card mb-8">
+          <div className="card-body">
+            <h2 className="text-sm font-semibold text-gray-700 mb-3">Alertas operativas</h2>
+            <div className="space-y-2">
+              {alerts.map((alert) => (
+                <button
+                  key={alert.key}
+                  onClick={alert.action}
+                  className={`w-full text-left px-4 py-3 rounded-lg border-l-4 hover:shadow-sm transition-all ${
+                    alert.type === 'critical'
+                      ? 'bg-red-50 border-red-500 hover:bg-red-100'
+                      : alert.type === 'warning'
+                      ? 'bg-yellow-50 border-yellow-500 hover:bg-yellow-100'
+                      : 'bg-blue-50 border-blue-500 hover:bg-blue-100'
+                  }`}
+                >
+                  <p
+                    className={`text-sm font-medium ${
+                      alert.type === 'critical'
+                        ? 'text-red-900'
+                        : alert.type === 'warning'
+                        ? 'text-yellow-900'
+                        : 'text-blue-900'
+                    }`}
+                  >
+                    {alert.type === 'critical' ? '🔴' : alert.type === 'warning' ? '🟠' : '🔵'}{' '}
+                    {alert.message}
+                  </p>
+                </button>
+              ))}
             </div>
-          ))}
+          </div>
         </div>
       )}
 
-      {/* Main metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <StatCard label="Tickets hoy" value={stats.createdToday} />
-        <StatCard label="Resueltos hoy" value={stats.resolvedToday} color="green" />
-        <StatCard label="Pendientes" value={stats.pending} color="blue" />
-        <StatCard label="Vencidos" value={stats.overdue} color="red" />
+      {/* Main KPIs */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <StatCard label="Tickets hoy" value={stats.createdToday} sublabel="Reportados" />
+        <StatCard label="Resueltos hoy" value={stats.resolvedToday} sublabel="Cerrados" color="green" />
+        <StatCard label="Activos" value={stats.pending} sublabel="En proceso" color="blue" />
+        <StatCard label="Vencidos" value={stats.overdue} sublabel="Urgentes" color="red" />
       </div>
 
       {/* SLA cards */}
-      <div className="mb-6">
-        <h2 className="text-xl font-semibold mb-4">Estado SLA (Activos)</h2>
+      <div className="mb-8">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Estado SLA - Tickets activos</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <SlaCard label="Verdes" sublabel="0-24 h" value={stats.green} color="green" />
-          <SlaCard label="Amarillos" sublabel="24-48 h" value={stats.yellow} color="yellow" />
-          <SlaCard label="Rojos" sublabel="48-72 h" value={stats.red} color="red" />
-          <SlaCard label="Vencidos" sublabel="+72 h" value={stats.overdue} color="dark-red" />
+          <SlaCard label="Verdes" sublabel="0-24 horas" value={stats.green} color="green" />
+          <SlaCard label="Amarillos" sublabel="24-48 horas" value={stats.yellow} color="yellow" />
+          <SlaCard label="Rojos" sublabel="48-72 horas" value={stats.red} color="red" />
+          <SlaCard label="Vencidos" sublabel="+72 horas" value={stats.overdue} color="overdue" />
         </div>
       </div>
 
-      {/* Resolved stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <StatCard label="Resueltos este mes" value={stats.resolvedMonth} color="green" />
-        <StatCard label="Resueltos este año" value={stats.resolvedYear} color="green" />
-        <div className="bg-white rounded-lg shadow p-6">
-          <h3 className="text-sm font-medium text-gray-500 mb-2">Técnicos</h3>
-          <div className="space-y-2">
-            <p className="text-sm">
-              <span className="font-semibold">{stats.activeTechs}</span> activos
-            </p>
-            <p className="text-sm">
-              <span className="font-semibold">{stats.techsWithLocation}</span> con ubicación reciente
-            </p>
-            <p className="text-sm">
-              <span className="font-semibold">{stats.inReview}</span> tickets en revisión
-            </p>
+      {/* Secondary metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        <div className="card">
+          <div className="card-body">
+            <h3 className="text-sm font-medium text-gray-500 mb-3">Resueltos este mes</h3>
+            <p className="text-3xl font-bold text-green-600">{stats.resolvedMonth}</p>
+          </div>
+        </div>
+        <div className="card">
+          <div className="card-body">
+            <h3 className="text-sm font-medium text-gray-500 mb-3">Resueltos este año</h3>
+            <p className="text-3xl font-bold text-green-600">{stats.resolvedYear}</p>
+          </div>
+        </div>
+        <div className="card">
+          <div className="card-body">
+            <h3 className="text-sm font-medium text-gray-500 mb-3">Técnicos</h3>
+            <div className="space-y-1.5 text-sm">
+              <p><span className="font-semibold text-gray-900">{stats.activeTechs}</span> <span className="text-gray-600">activos</span></p>
+              <p><span className="font-semibold text-gray-900">{stats.techsWithLocation}</span> <span className="text-gray-600">con ubicación</span></p>
+              <p><span className="font-semibold text-gray-900">{stats.inReview}</span> <span className="text-gray-600">en revisión</span></p>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Lists */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-lg shadow">
-          <div className="p-6 border-b">
-            <h2 className="text-lg font-semibold">Últimos tickets resueltos</h2>
+        <div className="card">
+          <div className="card-header">
+            <h2 className="text-lg font-semibold text-gray-900">Últimos resueltos</h2>
           </div>
-          <div className="divide-y">
+          <div className="divide-y divide-gray-100">
             {recentResolved.length === 0 ? (
-              <div className="p-6 text-center text-gray-500">
-                No hay tickets resueltos
+              <div className="p-8 text-center text-sm text-gray-500">
+                No hay tickets resueltos recientemente
               </div>
             ) : (
               recentResolved.map(ticket => (
                 <div
                   key={ticket.id}
                   onClick={() => router.push(`/tickets/${ticket.id}`)}
-                  className="p-4 hover:bg-gray-50 cursor-pointer transition"
+                  className="p-4 hover:bg-gray-50 cursor-pointer transition-colors"
                 >
                   <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-mono text-sm font-semibold">
+                    <div className="flex-1">
+                      <p className="font-mono text-sm font-semibold text-gray-900">
                         {formatTicketFolio(ticket.folio)}
                       </p>
-                      <p className="text-sm text-gray-600">{ticket.client?.name}</p>
-                      <p className="text-xs text-gray-500">
+                      <p className="text-sm text-gray-600 mt-0.5">{ticket.client?.name}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
                         {ticket.technician?.profile?.full_name || 'Sin técnico'}
                       </p>
                     </div>
-                    <div className="text-right">
-                      <p className="text-xs text-gray-500">
-                        {ticket.closed_at &&
-                          new Date(ticket.closed_at).toLocaleDateString('es-MX')}
-                      </p>
+                    <div className="text-right text-xs text-gray-500">
+                      {ticket.closed_at &&
+                        new Date(ticket.closed_at).toLocaleDateString('es-MX', {
+                          day: 'numeric',
+                          month: 'short'
+                        })}
                     </div>
                   </div>
                 </div>
@@ -386,13 +385,13 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow">
-          <div className="p-6 border-b">
-            <h2 className="text-lg font-semibold">Próximos a atender</h2>
+        <div className="card">
+          <div className="card-header">
+            <h2 className="text-lg font-semibold text-gray-900">Próximos a atender</h2>
           </div>
-          <div className="divide-y">
+          <div className="divide-y divide-gray-100">
             {nextToAttend.length === 0 ? (
-              <div className="p-6 text-center text-gray-500">
+              <div className="p-8 text-center text-sm text-gray-500">
                 No hay tickets pendientes
               </div>
             ) : (
@@ -402,24 +401,20 @@ export default function DashboardPage() {
                   <div
                     key={ticket.id}
                     onClick={() => router.push(`/tickets/${ticket.id}`)}
-                    className="p-4 hover:bg-gray-50 cursor-pointer transition"
+                    className="p-4 hover:bg-gray-50 cursor-pointer transition-colors"
                   >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-mono text-sm font-semibold">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-mono text-sm font-semibold text-gray-900">
                           {formatTicketFolio(ticket.folio)}
                         </p>
-                        <p className="text-sm text-gray-600">{ticket.client?.name}</p>
-                        <p className="text-xs text-gray-500">
+                        <p className="text-sm text-gray-600 mt-0.5 truncate">{ticket.client?.name}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">
                           {ticket.technician?.profile?.full_name || 'Sin asignar'}
                         </p>
                       </div>
-                      <div className="text-right">
-                        <span
-                          className={`inline-block px-2 py-1 text-xs rounded-full ${getSlaColor(
-                            slaState
-                          )}`}
-                        >
+                      <div className="text-right flex-shrink-0">
+                        <span className={`inline-block px-2 py-1 text-xs font-medium rounded-full ${getSlaColor(slaState)}`}>
                           {getSlaLabel(slaState)}
                         </span>
                         <p className="text-xs text-gray-500 mt-1">
@@ -441,23 +436,28 @@ export default function DashboardPage() {
 function StatCard({
   label,
   value,
+  sublabel,
   color = 'gray',
 }: {
   label: string;
   value: number;
+  sublabel?: string;
   color?: 'gray' | 'green' | 'blue' | 'red';
 }) {
   const colors = {
-    gray: 'text-gray-600',
+    gray: 'text-gray-900',
     green: 'text-green-600',
     blue: 'text-blue-600',
     red: 'text-red-600',
   };
 
   return (
-    <div className="bg-white rounded-lg shadow p-6">
-      <h3 className="text-sm font-medium text-gray-500 mb-2">{label}</h3>
-      <p className={`text-3xl font-bold ${colors[color]}`}>{value}</p>
+    <div className="card">
+      <div className="card-body">
+        <h3 className="text-sm font-medium text-gray-500 mb-1">{label}</h3>
+        <p className={`text-3xl font-bold ${colors[color]}`}>{value}</p>
+        {sublabel && <p className="text-xs text-gray-500 mt-1">{sublabel}</p>}
+      </div>
     </div>
   );
 }
@@ -471,19 +471,19 @@ function SlaCard({
   label: string;
   sublabel: string;
   value: number;
-  color: 'green' | 'yellow' | 'red' | 'dark-red';
+  color: 'green' | 'yellow' | 'red' | 'overdue';
 }) {
   const colors = {
-    green: 'bg-green-50 border-green-200 text-green-800',
-    yellow: 'bg-yellow-50 border-yellow-200 text-yellow-800',
-    red: 'bg-red-50 border-red-200 text-red-800',
-    'dark-red': 'bg-red-100 border-red-300 text-red-900',
+    green: 'bg-emerald-50 border-emerald-200 text-emerald-900',
+    yellow: 'bg-amber-50 border-amber-200 text-amber-900',
+    red: 'bg-orange-50 border-orange-200 text-orange-900',
+    overdue: 'bg-red-50 border-red-300 text-red-900',
   };
 
   return (
-    <div className={`rounded-lg border-2 p-6 ${colors[color]}`}>
-      <h3 className="text-sm font-medium mb-1">{label}</h3>
-      <p className="text-xs mb-2">{sublabel}</p>
+    <div className={`rounded-xl border-2 p-6 ${colors[color]}`}>
+      <h3 className="text-sm font-semibold mb-1">{label}</h3>
+      <p className="text-xs opacity-75 mb-3">{sublabel}</p>
       <p className="text-4xl font-bold">{value}</p>
     </div>
   );
@@ -492,12 +492,13 @@ function SlaCard({
 function getSlaColor(slaState: TicketSlaState): string {
   switch (slaState) {
     case TicketSlaState.GREEN:
-      return 'bg-green-100 text-green-800';
+      return 'bg-emerald-100 text-emerald-800';
     case TicketSlaState.YELLOW:
-      return 'bg-yellow-100 text-yellow-800';
+      return 'bg-amber-100 text-amber-800';
     case TicketSlaState.RED:
+      return 'bg-orange-100 text-orange-800';
     case TicketSlaState.OVERDUE:
-      return 'bg-red-100 text-red-800';
+      return 'bg-red-100 text-red-900 font-semibold';
     default:
       return 'bg-gray-100 text-gray-800';
   }

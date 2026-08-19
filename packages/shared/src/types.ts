@@ -7,6 +7,7 @@ export interface Profile {
   role: UserRole;
   phone: string | null;
   is_active: boolean;
+  must_change_password: boolean;
   created_at: string;
   updated_at: string;
 }

@@ -85,7 +85,7 @@ function Header() {
   }
 
   const navLinks = [
-    { href: '/dashboard', label: 'Dashboard' },
+    { href: '/dashboard', label: 'Inicio' },
     { href: '/tickets', label: 'Tickets', badge: criticalCount > 0 ? criticalCount : undefined },
     { href: '/clients', label: 'Clientes' },
     { href: '/technicians', label: 'Técnicos' },
@@ -93,34 +93,53 @@ function Header() {
   ];
 
   return (
-    <header className="bg-white shadow">
+    <header className="bg-white border-b border-gray-200">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center py-4 border-b">
-          <h1 className="text-2xl font-bold text-gray-900">Wisper Logística</h1>
-          <div className="flex items-center gap-4">
-            <span className="text-gray-700">{profile?.full_name}</span>
+        {/* Top bar */}
+        <div className="flex justify-between items-center py-4">
+          <div>
+            <h1 className="text-xl font-bold text-gray-900">Wisper Logística</h1>
+            <p className="text-xs text-gray-500 mt-0.5">Panel administrativo</p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {/* User info */}
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 bg-blue-600 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                {profile?.full_name?.charAt(0) || 'A'}
+              </div>
+              <div className="hidden sm:block text-right">
+                <p className="text-sm font-medium text-gray-900">{profile?.full_name}</p>
+                <p className="text-xs text-gray-500">Administrador</p>
+              </div>
+            </div>
+
+            {/* Logout button */}
             <button
               onClick={handleSignOut}
-              className="px-4 py-2 text-sm bg-gray-200 hover:bg-gray-300 rounded-md transition"
+              className="px-3 py-1.5 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors font-medium"
+              title="Cerrar sesión"
             >
-              Cerrar sesión
+              Salir
             </button>
           </div>
         </div>
-        <nav className="flex gap-1 py-2">
+
+        {/* Navigation */}
+        <nav className="flex gap-1 -mb-px" role="navigation">
           {navLinks.map(link => (
             <Link
               key={link.href}
               href={link.href}
-              className={`relative px-4 py-2 rounded-md text-sm font-medium transition ${
+              className={`relative px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                 pathname === link.href
-                  ? 'bg-blue-100 text-blue-700'
-                  : 'text-gray-700 hover:bg-gray-100'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300'
               }`}
             >
               {link.label}
               {link.badge !== undefined && link.badge > 0 && (
-                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
+                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
                   {link.badge > 9 ? '9+' : link.badge}
                 </span>
               )}

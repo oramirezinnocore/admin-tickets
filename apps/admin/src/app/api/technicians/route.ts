@@ -1,8 +1,48 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { webcrypto } from 'crypto';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+
+/**
+ * Generate secure temporary password
+ * 12 characters with uppercase, lowercase, numbers, and special characters
+ */
+function generateSecurePassword(): string {
+  const length = 12;
+  const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const lowercase = 'abcdefghijklmnopqrstuvwxyz';
+  const numbers = '0123456789';
+  const special = '@#$%&*!?';
+  const allChars = uppercase + lowercase + numbers + special;
+
+  // Ensure at least one of each required type
+  const array = new Uint8Array(length);
+  webcrypto.getRandomValues(array);
+
+  let password = '';
+
+  // Add one of each required character type
+  password += uppercase[array[0] % uppercase.length];
+  password += lowercase[array[1] % lowercase.length];
+  password += numbers[array[2] % numbers.length];
+  password += special[array[3] % special.length];
+
+  // Fill remaining with random characters from all sets
+  for (let i = 4; i < length; i++) {
+    password += allChars[array[i] % allChars.length];
+  }
+
+  // Shuffle the password
+  const passwordArray = password.split('');
+  for (let i = passwordArray.length - 1; i > 0; i--) {
+    const j = array[i] % (i + 1);
+    [passwordArray[i], passwordArray[j]] = [passwordArray[j], passwordArray[i]];
+  }
+
+  return passwordArray.join('');
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -35,15 +75,18 @@ export async function POST(request: NextRequest) {
 
     // Get request body
     const body = await request.json();
-    const { full_name, email, phone, password, zone, vehicle } = body;
+    const { full_name, email, phone, zone, vehicle } = body;
 
-    // Validate required fields
-    if (!full_name || !email || !password) {
+    // Validate required fields (password is no longer required)
+    if (!full_name || !email) {
       return NextResponse.json(
-        { error: 'full_name, email y password son obligatorios' },
+        { error: 'full_name y email son obligatorios' },
         { status: 400 }
       );
     }
+
+    // Generate secure temporary password
+    const temporaryPassword = generateSecurePassword();
 
     // Create technician using service role
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
@@ -56,7 +99,7 @@ export async function POST(request: NextRequest) {
     // Create auth user
     const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
       email,
-      password,
+      password: temporaryPassword,
       email_confirm: true,
       user_metadata: { full_name, phone },
     });
@@ -75,10 +118,15 @@ export async function POST(request: NextRequest) {
       // Wait a bit for trigger to complete
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      // Update profile with additional data
+      // Update profile with additional data and set must_change_password
       const { error: profileUpdateError } = await supabaseAdmin
         .from('profiles')
-        .update({ full_name, phone, email })
+        .update({
+          full_name,
+          phone,
+          email,
+          must_change_password: true
+        })
         .eq('id', userId);
 
       if (profileUpdateError) {
@@ -116,6 +164,7 @@ export async function POST(request: NextRequest) {
           zone,
           vehicle,
         },
+        temporaryPassword, // Return temporary password ONLY once
       });
     } catch (error: any) {
       // Rollback: delete user

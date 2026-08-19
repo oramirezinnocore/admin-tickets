@@ -7,6 +7,8 @@ import {
   FlatList,
   RefreshControl,
   ActivityIndicator,
+  Modal,
+  ScrollView,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../services/auth-context';
@@ -27,7 +29,12 @@ interface TicketWithClient extends Ticket {
   client: Client;
 }
 
-type FilterType = 'pending' | 'in_review' | 'paused' | 'all';
+type PrimaryFilterType = 'pending' | 'in_review' | 'paused';
+
+interface AdvancedFilters {
+  status: TicketStatus | 'ALL';
+  sla: TicketSlaState | 'ALL';
+}
 
 export default function TicketsScreen() {
   const navigation = useNavigation();
@@ -36,7 +43,12 @@ export default function TicketsScreen() {
   const [filteredTickets, setFilteredTickets] = useState<TicketWithClient[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [filter, setFilter] = useState<FilterType>('pending');
+  const [primaryFilter, setPrimaryFilter] = useState<PrimaryFilterType>('pending');
+  const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilters>({
+    status: 'ALL',
+    sla: 'ALL',
+  });
+  const [showFiltersModal, setShowFiltersModal] = useState(false);
   const [technician, setTechnician] = useState<any>(null);
 
   useEffect(() => {
@@ -45,7 +57,7 @@ export default function TicketsScreen() {
 
   useEffect(() => {
     filterTickets();
-  }, [tickets, filter]);
+  }, [tickets, primaryFilter, advancedFilters]);
 
   async function loadTickets() {
     if (!profile) return;
@@ -85,20 +97,32 @@ export default function TicketsScreen() {
   function filterTickets() {
     let filtered = tickets;
 
-    switch (filter) {
+    // Apply primary filter
+    switch (primaryFilter) {
       case 'pending':
-        filtered = tickets.filter(
+        filtered = filtered.filter(
           t => t.status !== 'RESOLVED' && t.status !== 'CANCELLED'
         );
         break;
       case 'in_review':
-        filtered = tickets.filter(t => t.status === 'IN_REVIEW');
+        filtered = filtered.filter(t => t.status === 'IN_REVIEW');
         break;
       case 'paused':
-        filtered = tickets.filter(t => t.status === 'PAUSED');
+        filtered = filtered.filter(t => t.status === 'PAUSED');
         break;
-      case 'all':
-        break;
+    }
+
+    // Apply advanced status filter
+    if (advancedFilters.status !== 'ALL') {
+      filtered = filtered.filter(t => t.status === advancedFilters.status);
+    }
+
+    // Apply advanced SLA filter
+    if (advancedFilters.sla !== 'ALL') {
+      filtered = filtered.filter(t => {
+        const sla = getTicketSlaState(t.created_at);
+        return sla === advancedFilters.sla;
+      });
     }
 
     // Sort by SLA priority
@@ -118,6 +142,17 @@ export default function TicketsScreen() {
 
     setFilteredTickets(filtered);
   }
+
+  function handleApplyAdvancedFilters(filters: AdvancedFilters) {
+    setAdvancedFilters(filters);
+    setShowFiltersModal(false);
+  }
+
+  function handleClearAdvancedFilters() {
+    setAdvancedFilters({ status: 'ALL', sla: 'ALL' });
+  }
+
+  const hasActiveAdvancedFilters = advancedFilters.status !== 'ALL' || advancedFilters.sla !== 'ALL';
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -178,23 +213,49 @@ export default function TicketsScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.filtersContainer}>
-        {(['pending', 'in_review', 'paused', 'all'] as FilterType[]).map(f => (
+      {/* Header with title and filter button */}
+      <View style={styles.headerContainer}>
+        <Text style={styles.headerTitle}>Tickets</Text>
+        <TouchableOpacity
+          style={styles.filterButton}
+          onPress={() => setShowFiltersModal(true)}
+        >
+          <Text style={styles.filterButtonText}>
+            {hasActiveAdvancedFilters ? '● ' : ''}Filtros
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Primary segmented control */}
+      <View style={styles.segmentedContainer}>
+        {(['pending', 'in_review', 'paused'] as PrimaryFilterType[]).map(f => (
           <TouchableOpacity
             key={f}
-            style={[styles.filterButton, filter === f && styles.filterButtonActive]}
-            onPress={() => setFilter(f)}
+            style={[
+              styles.segmentButton,
+              primaryFilter === f && styles.segmentButtonActive,
+            ]}
+            onPress={() => setPrimaryFilter(f)}
           >
             <Text
-              style={[styles.filterText, filter === f && styles.filterTextActive]}
+              style={[
+                styles.segmentText,
+                primaryFilter === f && styles.segmentTextActive,
+              ]}
             >
               {f === 'pending' && 'Pendientes'}
               {f === 'in_review' && 'En revisión'}
               {f === 'paused' && 'Pausados'}
-              {f === 'all' && 'Todos'}
             </Text>
           </TouchableOpacity>
         ))}
+      </View>
+
+      {/* Result counter */}
+      <View style={styles.counterContainer}>
+        <Text style={styles.counterText}>
+          {filteredTickets.length} ticket{filteredTickets.length !== 1 ? 's' : ''} encontrado{filteredTickets.length !== 1 ? 's' : ''}
+        </Text>
       </View>
 
       <FlatList
@@ -252,7 +313,150 @@ export default function TicketsScreen() {
         }
         contentContainerStyle={styles.listContent}
       />
+
+      {/* Advanced Filters Modal */}
+      <FiltersModal
+        visible={showFiltersModal}
+        currentFilters={advancedFilters}
+        onApply={handleApplyAdvancedFilters}
+        onClear={handleClearAdvancedFilters}
+        onClose={() => setShowFiltersModal(false)}
+      />
     </View>
+  );
+}
+
+// Advanced Filters Modal Component
+function FiltersModal({
+  visible,
+  currentFilters,
+  onApply,
+  onClear,
+  onClose,
+}: {
+  visible: boolean;
+  currentFilters: AdvancedFilters;
+  onApply: (filters: AdvancedFilters) => void;
+  onClear: () => void;
+  onClose: () => void;
+}) {
+  const [tempFilters, setTempFilters] = useState<AdvancedFilters>(currentFilters);
+
+  useEffect(() => {
+    setTempFilters(currentFilters);
+  }, [currentFilters, visible]);
+
+  const statusOptions: { value: TicketStatus | 'ALL'; label: string }[] = [
+    { value: 'ALL', label: 'Todos' },
+    { value: TicketStatus.ASSIGNED, label: 'Asignados' },
+    { value: TicketStatus.IN_REVIEW, label: 'En revisión' },
+    { value: TicketStatus.PAUSED, label: 'Pausados' },
+    { value: TicketStatus.RESOLVED, label: 'Resueltos' },
+  ];
+
+  const slaOptions: { value: TicketSlaState | 'ALL'; label: string }[] = [
+    { value: 'ALL', label: 'Todos' },
+    { value: TicketSlaState.GREEN, label: 'Verde (0-24 h)' },
+    { value: TicketSlaState.YELLOW, label: 'Amarillo (24-48 h)' },
+    { value: TicketSlaState.RED, label: 'Rojo (48-72 h)' },
+    { value: TicketSlaState.OVERDUE, label: 'Vencido (+72 h)' },
+  ];
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent
+      onRequestClose={onClose}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Filtros</Text>
+            <TouchableOpacity onPress={onClose}>
+              <Text style={styles.modalCloseText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.modalBody}>
+            {/* Status Filter */}
+            <View style={styles.filterSection}>
+              <Text style={styles.filterSectionTitle}>Estado</Text>
+              <View style={styles.optionsGrid}>
+                {statusOptions.map(option => (
+                  <TouchableOpacity
+                    key={option.value}
+                    style={[
+                      styles.optionButton,
+                      tempFilters.status === option.value && styles.optionButtonActive,
+                    ]}
+                    onPress={() =>
+                      setTempFilters({ ...tempFilters, status: option.value })
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.optionText,
+                        tempFilters.status === option.value && styles.optionTextActive,
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* SLA Filter */}
+            <View style={styles.filterSection}>
+              <Text style={styles.filterSectionTitle}>SLA</Text>
+              <View style={styles.optionsGrid}>
+                {slaOptions.map(option => (
+                  <TouchableOpacity
+                    key={option.value}
+                    style={[
+                      styles.optionButton,
+                      tempFilters.sla === option.value && styles.optionButtonActive,
+                    ]}
+                    onPress={() =>
+                      setTempFilters({ ...tempFilters, sla: option.value })
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.optionText,
+                        tempFilters.sla === option.value && styles.optionTextActive,
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          </ScrollView>
+
+          <View style={styles.modalFooter}>
+            <TouchableOpacity
+              style={styles.clearButton}
+              onPress={() => {
+                setTempFilters({ status: 'ALL', sla: 'ALL' });
+                onClear();
+                onClose();
+              }}
+            >
+              <Text style={styles.clearButtonText}>Limpiar filtros</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.applyButton}
+              onPress={() => onApply(tempFilters)}
+            >
+              <Text style={styles.applyButtonText}>Aplicar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -265,30 +469,65 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  filtersContainer: {
+  headerContainer: {
     flexDirection: 'row',
-    padding: 12,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     backgroundColor: 'white',
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
   },
-  filterButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
-    marginRight: 8,
-    backgroundColor: '#f3f4f6',
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#111827',
   },
-  filterButtonActive: {
+  filterButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
     backgroundColor: '#007AFF',
   },
-  filterText: {
+  filterButtonText: {
     fontSize: 14,
+    fontWeight: '600',
+    color: 'white',
+  },
+  segmentedContainer: {
+    flexDirection: 'row',
+    padding: 12,
+    backgroundColor: 'white',
+    gap: 8,
+  },
+  segmentButton: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    backgroundColor: '#f3f4f6',
+    alignItems: 'center',
+  },
+  segmentButtonActive: {
+    backgroundColor: '#007AFF',
+  },
+  segmentText: {
+    fontSize: 13,
+    fontWeight: '600',
     color: '#6b7280',
   },
-  filterTextActive: {
+  segmentTextActive: {
     color: 'white',
-    fontWeight: '600',
+  },
+  counterContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: 'white',
+  },
+  counterText: {
+    fontSize: 13,
+    color: '#6b7280',
   },
   listContent: {
     padding: 16,
@@ -311,26 +550,26 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   folio: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#111827',
     fontFamily: 'monospace',
   },
   slaBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 12,
   },
   slaBadgeText: {
     color: 'white',
-    fontSize: 11,
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '700',
   },
   clientName: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '600',
     color: '#111827',
-    marginBottom: 4,
+    marginBottom: 6,
   },
   failureType: {
     fontSize: 14,
@@ -346,6 +585,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#f3f4f6',
   },
   statusBadge: {
     paddingHorizontal: 10,
@@ -360,6 +602,7 @@ const styles = StyleSheet.create({
   age: {
     fontSize: 13,
     color: '#6b7280',
+    fontWeight: '500',
   },
   emptyContainer: {
     padding: 40,
@@ -368,5 +611,102 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 16,
     color: '#9ca3af',
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#111827',
+  },
+  modalCloseText: {
+    fontSize: 28,
+    color: '#6b7280',
+    fontWeight: '300',
+  },
+  modalBody: {
+    padding: 20,
+  },
+  filterSection: {
+    marginBottom: 24,
+  },
+  filterSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 12,
+  },
+  optionsGrid: {
+    gap: 8,
+  },
+  optionButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: '#f3f4f6',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  optionButtonActive: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  optionText: {
+    fontSize: 14,
+    color: '#374151',
+    fontWeight: '500',
+  },
+  optionTextActive: {
+    color: 'white',
+    fontWeight: '600',
+  },
+  modalFooter: {
+    flexDirection: 'row',
+    padding: 20,
+    gap: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
+  },
+  clearButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 8,
+    backgroundColor: '#f3f4f6',
+    alignItems: 'center',
+  },
+  clearButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#6b7280',
+  },
+  applyButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 8,
+    backgroundColor: '#007AFF',
+    alignItems: 'center',
+  },
+  applyButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: 'white',
   },
 });

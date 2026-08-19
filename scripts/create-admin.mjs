@@ -78,10 +78,10 @@ async function createAdmin() {
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
-    // Update profile role to ADMIN
+    // Update profile role to ADMIN and ensure must_change_password is false
     const { error: profileError } = await supabase
       .from('profiles')
-      .update({ role: 'ADMIN', full_name: adminFullName })
+      .update({ role: 'ADMIN', full_name: adminFullName, must_change_password: false })
       .eq('id', userId);
 
     if (profileError) {

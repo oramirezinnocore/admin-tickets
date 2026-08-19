@@ -185,39 +185,45 @@ async function seedTickets(technicianId) {
   }
 
   const now = new Date();
+
+  // Define tickets with deterministic ages for consistent SLA testing
+  // GREEN: 8h old (within 0-24h)
+  // YELLOW: 30h old (within 24-48h)
+  // RED: 55h old (within 48-72h)
+  // OVERDUE: 80h old (over 72h)
   const tickets = [
     {
       client_id: client.id,
       technician_id: technicianId,
-      failure_type: '[E2E] Ticket GREEN - reciente',
+      failure_type: '[E2E] Ticket VERDE - 8 h',
       status: 'ASSIGNED',
-      created_at: now.toISOString(),
+      created_at: new Date(now.getTime() - 8 * 60 * 60 * 1000).toISOString(),
     },
     {
       client_id: client.id,
       technician_id: technicianId,
-      failure_type: '[E2E] Ticket YELLOW - 30h antiguo',
+      failure_type: '[E2E] Ticket AMARILLO - 30 h',
       status: 'ASSIGNED',
       created_at: new Date(now.getTime() - 30 * 60 * 60 * 1000).toISOString(),
     },
     {
       client_id: client.id,
       technician_id: technicianId,
-      failure_type: '[E2E] Ticket RED - 55h antiguo',
+      failure_type: '[E2E] Ticket ROJO - 55 h',
       status: 'ASSIGNED',
       created_at: new Date(now.getTime() - 55 * 60 * 60 * 1000).toISOString(),
     },
     {
       client_id: client.id,
       technician_id: technicianId,
-      failure_type: '[E2E] Ticket OVERDUE - 80h antiguo',
+      failure_type: '[E2E] Ticket VENCIDO - 80 h',
       status: 'ASSIGNED',
       created_at: new Date(now.getTime() - 80 * 60 * 60 * 1000).toISOString(),
     },
   ];
 
   for (const ticket of tickets) {
-    // Check if similar ticket exists
+    // Check if ticket exists by failure_type
     const { data: existing } = await supabase
       .from('tickets')
       .select('id')
@@ -225,15 +231,30 @@ async function seedTickets(technicianId) {
       .single();
 
     if (existing) {
-      console.log(`   ↳ ${ticket.failure_type.substring(0, 40)} already exists`);
-      continue;
-    }
+      // Update existing ticket with fresh timestamp
+      const { error } = await supabase
+        .from('tickets')
+        .update({
+          created_at: ticket.created_at,
+          status: ticket.status,
+          technician_id: ticket.technician_id,
+          client_id: ticket.client_id,
+        })
+        .eq('id', existing.id);
 
-    const { error } = await supabase.from('tickets').insert(ticket);
-    if (error) {
-      console.log(`   ❌ ${ticket.failure_type}: ${error.message}`);
+      if (error) {
+        console.log(`   ❌ ${ticket.failure_type}: ${error.message}`);
+      } else {
+        console.log(`   🔄 ${ticket.failure_type} (timestamp refreshed)`);
+      }
     } else {
-      console.log(`   ✅ ${ticket.failure_type}`);
+      // Insert new ticket
+      const { error } = await supabase.from('tickets').insert(ticket);
+      if (error) {
+        console.log(`   ❌ ${ticket.failure_type}: ${error.message}`);
+      } else {
+        console.log(`   ✅ ${ticket.failure_type}`);
+      }
     }
   }
 }

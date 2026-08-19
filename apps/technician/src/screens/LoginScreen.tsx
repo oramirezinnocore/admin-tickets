@@ -38,7 +38,7 @@ export default function LoginScreen() {
       <Text style={styles.subtitle}>App Técnicos</Text>
 
       <View style={styles.form}>
-        <Text style={styles.label}>Email</Text>
+        <Text style={styles.label}>Correo electrónico</Text>
         <TextInput
           style={styles.input}
           value={email}

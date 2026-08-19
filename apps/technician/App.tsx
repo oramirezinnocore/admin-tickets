@@ -9,9 +9,11 @@ import LoginScreen from './src/screens/LoginScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import TicketsScreen from './src/screens/TicketsScreen';
 import TicketDetailScreen from './src/screens/TicketDetailScreen';
+import ChangePasswordScreen from './src/screens/ChangePasswordScreen';
 
 const AuthStack = createNativeStackNavigator();
 const AppStack = createNativeStackNavigator();
+const PasswordStack = createNativeStackNavigator();
 
 function AuthNavigator() {
   return (
@@ -21,18 +23,30 @@ function AuthNavigator() {
   );
 }
 
+function ChangePasswordNavigator() {
+  return (
+    <PasswordStack.Navigator>
+      <PasswordStack.Screen
+        name="ChangePassword"
+        component={ChangePasswordScreen}
+        options={{ headerShown: false }}
+      />
+    </PasswordStack.Navigator>
+  );
+}
+
 function AppNavigator() {
   return (
     <AppStack.Navigator>
       <AppStack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
       <AppStack.Screen name="Tickets" component={TicketsScreen} options={{ title: 'Tickets' }} />
-      <AppStack.Screen name="TicketDetail" component={TicketDetailScreen} options={{ title: 'Detalle' }} />
+      <AppStack.Screen name="TicketDetail" component={TicketDetailScreen} options={{ title: 'Detalle del ticket' }} />
     </AppStack.Navigator>
   );
 }
 
 function RootNavigator() {
-  const { user, loading } = useAuth();
+  const { user, loading, mustChangePassword } = useAuth();
 
   if (loading) {
     return (
@@ -40,6 +54,11 @@ function RootNavigator() {
         <ActivityIndicator size="large" color="#007AFF" />
       </View>
     );
+  }
+
+  // If user is logged in but must change password, show change password screen
+  if (user && mustChangePassword) {
+    return <ChangePasswordNavigator />;
   }
 
   return user ? <AppNavigator /> : <AuthNavigator />;

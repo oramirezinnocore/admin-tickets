@@ -301,6 +301,104 @@ export default function TechniciansPage() {
   );
 }
 
+interface CredentialsDisplayProps {
+  email: string;
+  temporaryPassword: string;
+  onClose: () => void;
+}
+
+function CredentialsDisplay({ email, temporaryPassword, onClose }: CredentialsDisplayProps) {
+  const [copied, setCopied] = useState(false);
+  const [shared, setShared] = useState(false);
+
+  const credentialsText = `Wisper Logística\n\nUsuario:\n${email}\n\nContraseña temporal:\n${temporaryPassword}\n\nAl iniciar sesión por primera vez, deberás crear una nueva contraseña.`;
+
+  function handleCopy() {
+    navigator.clipboard.writeText(credentialsText).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  async function handleShare() {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'Wisper Logística - Credenciales',
+          text: credentialsText,
+        });
+        setShared(true);
+        setTimeout(() => setShared(false), 2000);
+      } catch (err) {
+        // User cancelled or error - fall back to copy
+        handleCopy();
+      }
+    } else {
+      // Share API not available - fall back to copy
+      handleCopy();
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-green-50 p-4 rounded-md border border-green-200">
+        <p className="text-green-800 font-medium">El técnico fue creado correctamente</p>
+      </div>
+
+      <div className="bg-gray-50 p-4 rounded-md border border-gray-200">
+        <h3 className="font-semibold text-gray-900 mb-3">Credenciales de acceso</h3>
+
+        <div className="space-y-3">
+          <div>
+            <p className="text-sm text-gray-600 mb-1">Correo electrónico:</p>
+            <p className="font-mono text-sm bg-white px-3 py-2 rounded border">{email}</p>
+          </div>
+
+          <div>
+            <p className="text-sm text-gray-600 mb-1">Contraseña temporal:</p>
+            <p className="font-mono text-sm bg-white px-3 py-2 rounded border break-all">
+              {temporaryPassword}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-yellow-50 p-3 rounded-md border border-yellow-200">
+        <p className="text-yellow-800 text-sm">
+          ⚠️ Esta contraseña solo se mostrará una vez. El técnico deberá cambiarla al iniciar sesión por primera vez.
+        </p>
+      </div>
+
+      <div className="flex gap-3">
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="flex-1 px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition"
+        >
+          {copied ? '✓ Copiado' : 'Copiar credenciales'}
+        </button>
+        <button
+          type="button"
+          onClick={handleShare}
+          className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+        >
+          {shared ? '✓ Compartido' : 'Compartir credenciales'}
+        </button>
+      </div>
+
+      <div className="pt-2">
+        <button
+          type="button"
+          onClick={onClose}
+          className="w-full px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-md transition"
+        >
+          Cerrar
+        </button>
+      </div>
+    </div>
+  );
+}
+
 interface CreateTechnicianModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -312,12 +410,15 @@ function CreateTechnicianModal({ isOpen, onClose, onSuccess }: CreateTechnicianM
     full_name: '',
     email: '',
     phone: '',
-    password: '',
     zone: '',
     vehicle: '',
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [credentials, setCredentials] = useState<{
+    email: string;
+    temporaryPassword: string;
+  } | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -325,11 +426,11 @@ function CreateTechnicianModal({ isOpen, onClose, onSuccess }: CreateTechnicianM
         full_name: '',
         email: '',
         phone: '',
-        password: '',
         zone: '',
         vehicle: '',
       });
       setError('');
+      setCredentials(null);
     }
   }, [isOpen]);
 
@@ -337,13 +438,8 @@ function CreateTechnicianModal({ isOpen, onClose, onSuccess }: CreateTechnicianM
     e.preventDefault();
     setError('');
 
-    if (!formData.full_name.trim() || !formData.email.trim() || !formData.password) {
-      setError('Nombre, email y contraseña son obligatorios');
-      return;
-    }
-
-    if (formData.password.length < 6) {
-      setError('La contraseña debe tener al menos 6 caracteres');
+    if (!formData.full_name.trim() || !formData.email.trim()) {
+      setError('Nombre y email son obligatorios');
       return;
     }
 
@@ -369,7 +465,6 @@ function CreateTechnicianModal({ isOpen, onClose, onSuccess }: CreateTechnicianM
           full_name: formData.full_name.trim(),
           email: formData.email.trim(),
           phone: formData.phone.trim() || null,
-          password: formData.password,
           zone: formData.zone.trim() || null,
           vehicle: formData.vehicle.trim() || null,
         }),
@@ -381,12 +476,35 @@ function CreateTechnicianModal({ isOpen, onClose, onSuccess }: CreateTechnicianM
         throw new Error(data.error || 'Error creating technician');
       }
 
-      onSuccess();
+      // Show credentials modal
+      setCredentials({
+        email: formData.email.trim(),
+        temporaryPassword: data.temporaryPassword,
+      });
     } catch (err: any) {
       setError(err.message);
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function handleCredentialsClose() {
+    setCredentials(null);
+    onClose();
+    onSuccess();
+  }
+
+  // Show credentials modal after successful creation
+  if (credentials) {
+    return (
+      <Modal isOpen={isOpen} onClose={handleCredentialsClose} title="Técnico creado">
+        <CredentialsDisplay
+          email={credentials.email}
+          temporaryPassword={credentials.temporaryPassword}
+          onClose={handleCredentialsClose}
+        />
+      </Modal>
+    );
   }
 
   return (
@@ -430,21 +548,6 @@ function CreateTechnicianModal({ isOpen, onClose, onSuccess }: CreateTechnicianM
             onChange={e => setFormData({ ...formData, phone: e.target.value })}
             className="w-full px-3 py-2 border rounded-md"
           />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium mb-1">
-            Contraseña temporal <span className="text-red-600">*</span>
-          </label>
-          <input
-            type="password"
-            value={formData.password}
-            onChange={e => setFormData({ ...formData, password: e.target.value })}
-            className="w-full px-3 py-2 border rounded-md"
-            required
-            minLength={6}
-          />
-          <p className="text-xs text-gray-500 mt-1">Mínimo 6 caracteres</p>
         </div>
 
         <div>

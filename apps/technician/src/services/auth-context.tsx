@@ -7,6 +7,7 @@ interface AuthContextType {
   user: User | null;
   profile: Profile | null;
   loading: boolean;
+  mustChangePassword: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 }
@@ -17,6 +18,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
 
   useEffect(() => {
     // Get initial session
@@ -67,10 +69,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      setProfile(data as Profile);
+      const profileData = data as Profile;
+      setProfile(profileData);
+      setMustChangePassword(profileData.must_change_password || false);
     } catch (error) {
       console.error('Unexpected error loading profile:', error);
       setProfile(null);
+      setMustChangePassword(false);
     } finally {
       setLoading(false);
     }
@@ -121,8 +126,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { error: 'Esta cuenta ha sido desactivada. Contacta al administrador.' };
       }
 
-      setProfile(profileData as Profile);
+      const profile = profileData as Profile;
+      setProfile(profile);
       setUser(data.user);
+      setMustChangePassword(profile.must_change_password || false);
       setLoading(false);
       return { error: null };
     } catch (error) {
@@ -135,10 +142,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);
+    setMustChangePassword(false);
   }
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, profile, loading, mustChangePassword, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   );

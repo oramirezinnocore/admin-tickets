@@ -1,9 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { optimizeRouteNearestNeighbor } from '@wisper/shared';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const googleRoutesKey = process.env.GOOGLE_ROUTES_API_KEY || '';
 
 export async function POST(request: NextRequest) {
   try {
@@ -68,6 +68,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Técnico inactivo' }, { status: 400 });
     }
 
+    // Get technician's latest location as origin
+    const { data: techLocation } = await supabase
+      .from('technician_latest_locations')
+      .select('latitude, longitude')
+      .eq('technician_id', technicianId)
+      .single();
+
+    if (!techLocation) {
+      return NextResponse.json(
+        { error: 'No hay una ubicación reciente del técnico para calcular la ruta sugerida.' },
+        { status: 400 }
+      );
+    }
+
+    const origin = {
+      latitude: techLocation.latitude,
+      longitude: techLocation.longitude,
+    };
+
     // Get tickets with client locations
     const { data: tickets } = await supabase
       .from('tickets')
@@ -75,6 +94,7 @@ export async function POST(request: NextRequest) {
         id,
         folio,
         status,
+        created_at,
         client:clients(
           id,
           name,
@@ -99,147 +119,33 @@ export async function POST(request: NextRequest) {
       (t: any) => t.client?.latitude && t.client?.longitude
     );
 
-    const ticketsWithoutLocation = tickets
-      .filter((t: any) => !t.client?.latitude || !t.client?.longitude)
-      .map((t: any) => ({
-        id: t.id,
-        folio: t.folio,
-        clientName: t.client?.name,
-        reason: 'Sin coordenadas',
-      }));
+    const ticketsWithoutLocation = tickets.filter(
+      (t: any) => !t.client?.latitude || !t.client?.longitude
+    );
 
     if (ticketsWithLocation.length === 0) {
       return NextResponse.json({
         orderedTicketIds: [],
         distanceMeters: 0,
-        durationSeconds: 0,
-        polyline: null,
         ticketsWithoutLocation,
         warning: 'Ningún ticket tiene coordenadas válidas',
       });
     }
 
-    // Get technician's latest location as origin
-    const { data: techLocation } = await supabase
-      .from('technician_latest_locations')
-      .select('latitude, longitude')
-      .eq('technician_id', technicianId)
-      .single();
-
-    let origin: { latitude: number; longitude: number };
-
-    if (techLocation) {
-      origin = {
-        latitude: techLocation.latitude,
-        longitude: techLocation.longitude,
-      };
-    } else {
-      // Fallback to first ticket location
-      const firstTicket = ticketsWithLocation[0] as any;
-      origin = {
-        latitude: firstTicket.client.latitude,
-        longitude: firstTicket.client.longitude,
-      };
-    }
-
-    // Call Google Routes API
-    if (!googleRoutesKey) {
-      // Fallback: return tickets in original order
-      return NextResponse.json({
-        orderedTicketIds: ticketsWithLocation.map((t: any) => t.id),
-        distanceMeters: 0,
-        durationSeconds: 0,
-        polyline: null,
-        ticketsWithoutLocation,
-        warning: 'GOOGLE_ROUTES_API_KEY no configurada. Orden sin optimizar.',
-      });
-    }
-
-    const waypoints = ticketsWithLocation.map((t: any) => ({
-      location: {
-        latLng: {
-          latitude: t.client.latitude,
-          longitude: t.client.longitude,
-        },
-      },
+    // Prepare destinations for optimization
+    const destinations = ticketsWithLocation.map((t: any) => ({
+      id: t.id,
+      latitude: t.client.latitude,
+      longitude: t.client.longitude,
     }));
 
-    const routesResponse = await fetch(
-      'https://routes.googleapis.com/directions/v2:computeRoutes',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': googleRoutesKey,
-          'X-Goog-FieldMask':
-            'routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,routes.optimizedIntermediateWaypointIndex',
-        },
-        body: JSON.stringify({
-          origin: {
-            location: {
-              latLng: {
-                latitude: origin.latitude,
-                longitude: origin.longitude,
-              },
-            },
-          },
-          destination: waypoints[waypoints.length - 1].location,
-          intermediates: waypoints.slice(0, -1),
-          travelMode: 'DRIVE',
-          optimizeWaypointOrder: true,
-        }),
-      }
-    );
-
-    if (!routesResponse.ok) {
-      console.error('Google Routes API error:', await routesResponse.text());
-      // Fallback
-      return NextResponse.json({
-        orderedTicketIds: ticketsWithLocation.map((t: any) => t.id),
-        distanceMeters: 0,
-        durationSeconds: 0,
-        polyline: null,
-        ticketsWithoutLocation,
-        warning: 'Error al optimizar ruta. Orden sin optimizar.',
-      });
-    }
-
-    const routesData = await routesResponse.json();
-    const route = routesData.routes?.[0];
-
-    if (!route) {
-      return NextResponse.json({
-        orderedTicketIds: ticketsWithLocation.map((t: any) => t.id),
-        distanceMeters: 0,
-        durationSeconds: 0,
-        polyline: null,
-        ticketsWithoutLocation,
-        warning: 'No se pudo calcular ruta',
-      });
-    }
-
-    // Build ordered ticket IDs based on optimized waypoint order
-    const optimizedIndices = route.optimizedIntermediateWaypointIndex || [];
-    const orderedTicketIds = optimizedIndices.map(
-      (index: number) => (ticketsWithLocation[index] as any).id
-    );
-
-    // Add last destination
-    orderedTicketIds.push(
-      (ticketsWithLocation[ticketsWithLocation.length - 1] as any).id
-    );
-
-    const distanceMeters = route.distanceMeters || 0;
-    const durationSeconds = parseInt(route.duration?.replace('s', '') || '0', 10);
-    const polyline = route.polyline?.encodedPolyline || null;
+    // Optimize route using nearest-neighbor algorithm
+    const result = optimizeRouteNearestNeighbor(origin, destinations);
 
     return NextResponse.json({
-      orderedTicketIds,
-      distanceMeters,
-      durationSeconds,
-      polyline,
+      orderedTicketIds: result.orderedPoints.map(p => p.id),
+      distanceMeters: Math.round(result.totalDistanceKm * 1000),
       ticketsWithoutLocation,
-      originUsed: techLocation ? 'technician' : 'firstTicket',
     });
   } catch (error: any) {
     console.error('Route optimization error:', error);
