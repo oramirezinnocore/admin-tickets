@@ -155,7 +155,7 @@ export default function TicketDetailPage() {
   }
 
   function openInMaps(lat: number, lng: number) {
-    window.open(`https://www.google.com/maps?q=${lat},${lng}`, '_blank');
+    window.open(`https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=17/${lat}/${lng}`, '_blank');
   }
 
   if (loading) {

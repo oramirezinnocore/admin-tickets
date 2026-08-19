@@ -49,28 +49,48 @@ export async function POST(request: NextRequest) {
     // Get user token from header
     const authHeader = request.headers.get('authorization');
     if (!authHeader) {
-      return NextResponse.json({ error: 'No authorization header' }, { status: 401 });
+      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
     }
 
     const token = authHeader.replace('Bearer ', '');
 
-    // Validate user is ADMIN
-    const supabaseClient = createClient(supabaseUrl, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser(token);
+    // Validate configuration
+    if (!supabaseUrl || !supabaseServiceKey) {
+      return NextResponse.json({ error: 'Configuración del servidor incompleta' }, { status: 500 });
+    }
+
+    // Create Supabase client with service role to validate token
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    });
+
+    // Validate user token
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
 
     if (userError || !user) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+      return NextResponse.json({ error: 'Token inválido' }, { status: 401 });
     }
 
     // Check if user is ADMIN
-    const { data: profile, error: profileError } = await supabaseClient
+    const { data: profile, error: profileError } = await supabaseAdmin
       .from('profiles')
-      .select('role')
+      .select('role, is_active')
       .eq('id', user.id)
       .single();
 
-    if (profileError || !profile || profile.role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    if (profileError || !profile) {
+      return NextResponse.json({ error: 'Usuario no encontrado' }, { status: 403 });
+    }
+
+    if (profile.role !== 'ADMIN') {
+      return NextResponse.json({ error: 'No tienes permisos para crear técnicos' }, { status: 403 });
+    }
+
+    if (!profile.is_active) {
+      return NextResponse.json({ error: 'Usuario desactivado' }, { status: 403 });
     }
 
     // Get request body
@@ -87,14 +107,6 @@ export async function POST(request: NextRequest) {
 
     // Generate secure temporary password
     const temporaryPassword = generateSecurePassword();
-
-    // Create technician using service role
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    });
 
     // Create auth user
     const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({

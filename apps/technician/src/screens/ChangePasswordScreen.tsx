@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,15 +8,24 @@ import {
   Alert,
   ActivityIndicator,
   ScrollView,
+  KeyboardAvoidingView,
+  Platform,
+  Keyboard,
+  TouchableWithoutFeedback,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../services/auth-context';
 import { supabase } from '../services/supabase';
 
 export default function ChangePasswordScreen() {
-  const { profile } = useAuth();
+  const { profile, refreshProfile } = useAuth();
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  const confirmPasswordInputRef = useRef<TextInput>(null);
 
   function validatePassword(password: string): { valid: boolean; errors: string[] } {
     const errors: string[] = [];
@@ -77,24 +86,26 @@ export default function ChangePasswordScreen() {
           .eq('id', profile.id);
 
         if (profileError) {
-          // Log error but don't block user - they can still use the app
           console.error('Error updating profile:', profileError);
+          // Try to refresh profile anyway
+          await refreshProfile();
           Alert.alert(
             'Advertencia',
-            'La contraseña fue actualizada pero hubo un problema. Contacta a soporte si esto persiste.'
+            'La contraseña fue actualizada pero hubo un problema al actualizar tu perfil. Si el problema persiste, contacta a soporte.'
           );
+          return;
         }
       }
 
+      // Refresh profile to update must_change_password state
+      // This will trigger navigation to Home automatically
+      await refreshProfile();
+
+      // Show success message after profile refresh
       Alert.alert(
         'Éxito',
-        'Tu contraseña ha sido actualizada correctamente',
-        [{ text: 'Continuar' }]
+        'Tu contraseña ha sido actualizada correctamente'
       );
-
-      // Force reload of profile to update must_change_password state
-      // The auth context will handle navigation
-      window.location.reload();
     } catch (error: any) {
       Alert.alert('Error', error.message || 'No se pudo actualizar la contraseña');
     } finally {
@@ -105,41 +116,93 @@ export default function ChangePasswordScreen() {
   const passwordValidation = validatePassword(newPassword);
   const passwordsMatch = newPassword && confirmPassword && newPassword === confirmPassword;
 
+  const canSubmit = passwordValidation.valid && passwordsMatch && !submitting;
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Crea tu nueva contraseña</Text>
-        <Text style={styles.subtitle}>
-          Estás usando una contraseña temporal. Por seguridad, debes crear una nueva contraseña.
-        </Text>
-      </View>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+    >
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <ScrollView
+          contentContainerStyle={styles.contentContainer}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+        >
+          <View style={styles.header}>
+            <Text style={styles.title}>Crea tu nueva contraseña</Text>
+            <Text style={styles.subtitle}>
+              Estás usando una contraseña temporal. Por seguridad, debes crear una nueva contraseña.
+            </Text>
+          </View>
 
-      <View style={styles.form}>
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Nueva contraseña</Text>
-          <TextInput
-            style={styles.input}
-            value={newPassword}
-            onChangeText={setNewPassword}
-            placeholder="Mínimo 8 caracteres"
-            secureTextEntry
-            editable={!submitting}
-            autoCapitalize="none"
-          />
-        </View>
+          <View style={styles.form}>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Nueva contraseña</Text>
+              <View style={styles.inputContainer}>
+                <TextInput
+                  style={styles.input}
+                  value={newPassword}
+                  onChangeText={setNewPassword}
+                  placeholder="Mínimo 8 caracteres"
+                  secureTextEntry={!showNewPassword}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  editable={!submitting}
+                  returnKeyType="next"
+                  onSubmitEditing={() => confirmPasswordInputRef.current?.focus()}
+                  blurOnSubmit={false}
+                />
+                <TouchableOpacity
+                  style={styles.eyeButton}
+                  onPress={() => setShowNewPassword(!showNewPassword)}
+                  accessibilityLabel={showNewPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                >
+                  <Ionicons
+                    name={showNewPassword ? 'eye-off-outline' : 'eye-outline'}
+                    size={24}
+                    color="#6b7280"
+                  />
+                </TouchableOpacity>
+              </View>
+            </View>
 
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Confirmar contraseña</Text>
-          <TextInput
-            style={styles.input}
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
-            placeholder="Repite la contraseña"
-            secureTextEntry
-            editable={!submitting}
-            autoCapitalize="none"
-          />
-        </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Confirmar contraseña</Text>
+              <View style={styles.inputContainer}>
+                <TextInput
+                  ref={confirmPasswordInputRef}
+                  style={styles.input}
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  placeholder="Repite la contraseña"
+                  secureTextEntry={!showConfirmPassword}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  editable={!submitting}
+                  returnKeyType="done"
+                  onSubmitEditing={() => {
+                    if (canSubmit) {
+                      handleUpdatePassword();
+                    } else {
+                      Keyboard.dismiss();
+                    }
+                  }}
+                />
+                <TouchableOpacity
+                  style={styles.eyeButton}
+                  onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                  accessibilityLabel={showConfirmPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                >
+                  <Ionicons
+                    name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'}
+                    size={24}
+                    color="#6b7280"
+                  />
+                </TouchableOpacity>
+              </View>
+            </View>
 
         {/* Password requirements */}
         <View style={styles.requirementsContainer}>
@@ -172,23 +235,25 @@ export default function ChangePasswordScreen() {
           </View>
         )}
 
-        <TouchableOpacity
-          style={[
-            styles.button,
-            submitting && styles.buttonDisabled,
-            (!passwordValidation.valid || !passwordsMatch) && styles.buttonDisabled,
-          ]}
-          onPress={handleUpdatePassword}
-          disabled={submitting || !passwordValidation.valid || !passwordsMatch}
-        >
-          {submitting ? (
-            <ActivityIndicator color="white" />
-          ) : (
-            <Text style={styles.buttonText}>Actualizar contraseña</Text>
-          )}
-        </TouchableOpacity>
-      </View>
-    </ScrollView>
+            <TouchableOpacity
+              style={[
+                styles.button,
+                submitting && styles.buttonDisabled,
+                (!passwordValidation.valid || !passwordsMatch) && styles.buttonDisabled,
+              ]}
+              onPress={handleUpdatePassword}
+              disabled={submitting || !passwordValidation.valid || !passwordsMatch}
+            >
+              {submitting ? (
+                <ActivityIndicator color="white" />
+              ) : (
+                <Text style={styles.buttonText}>Actualizar contraseña</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </TouchableWithoutFeedback>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -198,6 +263,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
   },
   contentContainer: {
+    flexGrow: 1,
     padding: 20,
   },
   header: {
@@ -234,14 +300,26 @@ const styles = StyleSheet.create({
     color: '#374151',
     marginBottom: 8,
   },
+  inputContainer: {
+    position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   input: {
+    flex: 1,
     borderWidth: 1,
     borderColor: '#d1d5db',
     borderRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 12,
+    paddingRight: 48,
     fontSize: 16,
     backgroundColor: 'white',
+  },
+  eyeButton: {
+    position: 'absolute',
+    right: 12,
+    padding: 4,
   },
   requirementsContainer: {
     marginBottom: 20,

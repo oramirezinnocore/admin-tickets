@@ -164,7 +164,6 @@ export default function MapPage() {
       style: 'https://tiles.openfreemap.org/styles/liberty',
       center: [-101.1949, 19.7037],
       zoom: 12,
-      attributionControl: true,
     });
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right');

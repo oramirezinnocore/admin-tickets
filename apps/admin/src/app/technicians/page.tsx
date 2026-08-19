@@ -473,7 +473,17 @@ function CreateTechnicianModal({ isOpen, onClose, onSuccess }: CreateTechnicianM
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Error creating technician');
+        // Handle different error status codes
+        if (response.status === 401) {
+          setError('Tu sesión expiró. Inicia sesión nuevamente.');
+        } else if (response.status === 403) {
+          setError(data.error || 'No tienes permisos para crear técnicos.');
+        } else if (response.status === 500) {
+          setError('Error del servidor. Intenta nuevamente.');
+        } else {
+          setError(data.error || 'No se pudo crear el técnico.');
+        }
+        return;
       }
 
       // Show credentials modal
@@ -482,7 +492,7 @@ function CreateTechnicianModal({ isOpen, onClose, onSuccess }: CreateTechnicianM
         temporaryPassword: data.temporaryPassword,
       });
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'Error de conexión. Intenta nuevamente.');
     } finally {
       setSubmitting(false);
     }
