@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../services/auth-context';
+import { useRealtimeTickets } from '../services/realtime-tickets';
 import { supabase } from '../services/supabase';
 import {
   Ticket,
@@ -38,7 +39,7 @@ interface AdvancedFilters {
 
 export default function TicketsScreen() {
   const navigation = useNavigation();
-  const { profile } = useAuth();
+  const { profile, technicianId } = useAuth();
   const [tickets, setTickets] = useState<TicketWithClient[]>([]);
   const [filteredTickets, setFilteredTickets] = useState<TicketWithClient[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,6 +52,17 @@ export default function TicketsScreen() {
   const [showFiltersModal, setShowFiltersModal] = useState(false);
   const [technician, setTechnician] = useState<any>(null);
 
+  // Realtime subscription
+  const handleTicketChange = useCallback(() => {
+    console.log('[TicketsScreen] Realtime change detected, refreshing...');
+    loadTickets();
+  }, []);
+
+  useRealtimeTickets({
+    technicianId,
+    onTicketChange: handleTicketChange,
+  });
+
   useEffect(() => {
     loadTickets();
   }, [profile]);
@@ -59,7 +71,7 @@ export default function TicketsScreen() {
     filterTickets();
   }, [tickets, primaryFilter, advancedFilters]);
 
-  async function loadTickets() {
+  const loadTickets = useCallback(async () => {
     if (!profile) return;
 
     try {
@@ -92,7 +104,7 @@ export default function TicketsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }
+  }, [profile]);
 
   function filterTickets() {
     let filtered = tickets;

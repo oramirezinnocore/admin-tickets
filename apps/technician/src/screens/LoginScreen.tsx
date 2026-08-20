@@ -12,6 +12,7 @@ import {
   Platform,
   Keyboard,
   TouchableWithoutFeedback,
+  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../services/auth-context';
@@ -43,7 +44,7 @@ export default function LoginScreen() {
   if (loading) {
     return (
       <View style={styles.container}>
-        <ActivityIndicator size="large" color="#007AFF" />
+        <ActivityIndicator size="large" color="#1F66A5" />
         <Text style={styles.loadingText}>Cargando...</Text>
       </View>
     );
@@ -62,7 +63,11 @@ export default function LoginScreen() {
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
         >
           <View style={styles.content}>
-            <Text style={styles.title}>Wisper Logística</Text>
+            <Image
+              source={require('../../assets/branding/wisper-logo.png')}
+              style={styles.logo}
+              resizeMode="contain"
+            />
             <Text style={styles.subtitle}>App Técnicos</Text>
 
             <View style={styles.form}>
@@ -141,11 +146,10 @@ const styles = StyleSheet.create({
   content: {
     alignItems: 'center',
   },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
+  logo: {
+    width: 200,
+    height: 60,
     marginBottom: 8,
-    color: '#333',
   },
   subtitle: {
     fontSize: 18,
@@ -185,7 +189,7 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   button: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#1F66A5',
     paddingVertical: 14,
     borderRadius: 8,
     marginTop: 24,

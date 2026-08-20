@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import ProtectedLayout from '@/components/ProtectedLayout';
 import Modal from '@/components/ui/Modal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import SearchableSelect from '@/components/ui/SearchableSelect';
+import type { SearchableSelectOption } from '@/components/ui/SearchableSelect';
 import { supabase } from '@/lib/supabase';
 import {
   Ticket,
@@ -396,6 +398,40 @@ function CreateTicketModal({ isOpen, onClose, onSuccess }: CreateTicketModalProp
     setTechnicians((data as any) || []);
   }
 
+  // Prepare client options
+  const clientOptions: SearchableSelectOption[] = useMemo(
+    () =>
+      clients.map(client => ({
+        value: client.id,
+        label: client.name,
+        searchText: `${client.name} ${client.phone || ''} ${client.address || ''}`,
+        secondaryText: [client.phone, client.address].filter(Boolean).join(' · '),
+      })),
+    [clients]
+  );
+
+  // Prepare technician options
+  const technicianOptions: SearchableSelectOption[] = useMemo(() => {
+    const opts: SearchableSelectOption[] = [
+      {
+        value: '',
+        label: 'Sin asignar',
+        secondaryText: 'El ticket quedará pendiente',
+      },
+    ];
+
+    technicians.forEach(tech => {
+      opts.push({
+        value: tech.id,
+        label: tech.profile?.full_name || 'Sin nombre',
+        searchText: `${tech.profile?.full_name || ''} ${tech.profile?.email || ''} ${tech.zone || ''}`,
+        secondaryText: [tech.zone, tech.profile?.email].filter(Boolean).join(' · '),
+      });
+    });
+
+    return opts;
+  }, [technicians]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
@@ -412,19 +448,34 @@ function CreateTicketModal({ isOpen, onClose, onSuccess }: CreateTicketModalProp
         client_id: formData.client_id,
         failure_type: formData.failure_type.trim(),
         admin_notes: formData.admin_notes.trim() || null,
+        status: 'PENDING',
       };
 
+      const { data: newTicket, error: insertError } = await supabase
+        .from('tickets')
+        .insert(payload)
+        .select('id')
+        .single();
+
+      if (insertError) throw insertError;
+      if (!newTicket) throw new Error('No se pudo crear el ticket');
+
+      // If technician was selected, assign it and send push notification
       if (formData.technician_id) {
-        payload.technician_id = formData.technician_id;
-        payload.status = 'ASSIGNED';
-        payload.assigned_at = new Date().toISOString();
-      } else {
-        payload.status = 'PENDING';
+        const response = await fetch(`/api/tickets/${newTicket.id}/assign`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            technicianId: formData.technician_id,
+          }),
+        });
+
+        if (!response.ok) {
+          console.warn('Error sending push notification, but ticket was created');
+        }
       }
-
-      const { error } = await supabase.from('tickets').insert(payload);
-
-      if (error) throw error;
 
       onSuccess();
     } catch (err: any) {
@@ -441,24 +492,16 @@ function CreateTicketModal({ isOpen, onClose, onSuccess }: CreateTicketModalProp
           <div className="p-3 bg-red-50 text-red-600 rounded-md text-sm">{error}</div>
         )}
 
-        <div>
-          <label className="block text-sm font-medium mb-1">
-            Cliente <span className="text-red-600">*</span>
-          </label>
-          <select
-            value={formData.client_id}
-            onChange={e => setFormData({ ...formData, client_id: e.target.value })}
-            className="w-full px-3 py-2 border rounded-md"
-            required
-          >
-            <option value="">Seleccionar cliente</option>
-            {clients.map(client => (
-              <option key={client.id} value={client.id}>
-                {client.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        <SearchableSelect
+          label="Cliente"
+          required
+          placeholder="Seleccionar cliente"
+          value={formData.client_id}
+          options={clientOptions}
+          onChange={value => setFormData({ ...formData, client_id: value })}
+          searchPlaceholder="Buscar cliente..."
+          emptyMessage="No se encontraron clientes"
+        />
 
         <div>
           <label className="block text-sm font-medium mb-1">
@@ -485,21 +528,15 @@ function CreateTicketModal({ isOpen, onClose, onSuccess }: CreateTicketModalProp
           />
         </div>
 
-        <div>
-          <label className="block text-sm font-medium mb-1">Técnico (opcional)</label>
-          <select
-            value={formData.technician_id}
-            onChange={e => setFormData({ ...formData, technician_id: e.target.value })}
-            className="w-full px-3 py-2 border rounded-md"
-          >
-            <option value="">Sin asignar</option>
-            {technicians.map(tech => (
-              <option key={tech.id} value={tech.id}>
-                {tech.profile?.full_name}
-              </option>
-            ))}
-          </select>
-        </div>
+        <SearchableSelect
+          label="Técnico (opcional)"
+          placeholder="Seleccionar técnico"
+          value={formData.technician_id}
+          options={technicianOptions}
+          onChange={value => setFormData({ ...formData, technician_id: value })}
+          searchPlaceholder="Buscar técnico..."
+          emptyMessage="No se encontraron técnicos"
+        />
 
         <div className="flex gap-3 justify-end pt-4">
           <button

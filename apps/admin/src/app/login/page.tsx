@@ -46,8 +46,14 @@ export default function LoginPage() {
       <div className="max-w-md w-full">
         {/* Branding */}
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Wisper Logística</h1>
-          <p className="text-sm text-gray-600">Panel administrativo</p>
+          <div className="flex justify-center mb-4">
+            <img
+              src="/branding/wisper-logo.png"
+              alt="Wisper Logística"
+              className="h-12 w-auto"
+            />
+          </div>
+          <p className="text-sm text-gray-600 font-medium">Panel administrativo</p>
         </div>
 
         {/* Login card */}

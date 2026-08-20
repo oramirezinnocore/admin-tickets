@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useAuth } from '@/lib/auth-context';
 import { UserRole, getTicketSlaState, TicketSlaState } from '@wisper/shared';
 import { supabase } from '@/lib/supabase';
@@ -97,15 +98,21 @@ function Header() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Top bar */}
         <div className="flex justify-between items-center py-4">
-          <div>
-            <h1 className="text-xl font-bold text-gray-900">Wisper Logística</h1>
-            <p className="text-xs text-gray-500 mt-0.5">Panel administrativo</p>
+          <div className="flex items-center gap-3">
+            <img
+              src="/branding/wisper-logo.png"
+              alt="Wisper Logística"
+              className="h-8 w-auto"
+            />
+            <div className="border-l border-gray-300 pl-3">
+              <p className="text-xs text-gray-600 font-medium">Panel administrativo</p>
+            </div>
           </div>
 
           <div className="flex items-center gap-3">
             {/* User info */}
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-blue-600 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+              <div className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-sm" style={{ backgroundColor: 'var(--wisper-blue)' }}>
                 {profile?.full_name?.charAt(0) || 'A'}
               </div>
               <div className="hidden sm:block text-right">
@@ -133,13 +140,14 @@ function Header() {
               href={link.href}
               className={`relative px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                 pathname === link.href
-                  ? 'border-blue-600 text-blue-600'
+                  ? 'text-blue-600 hover:text-gray-900 hover:border-gray-300'
                   : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300'
               }`}
+              style={pathname === link.href ? { borderColor: 'var(--wisper-blue)', color: 'var(--wisper-blue)' } : undefined}
             >
               {link.label}
               {link.badge !== undefined && link.badge > 0 && (
-                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                <span className="absolute -top-1 -right-1 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1" style={{ backgroundColor: 'var(--wisper-red)' }}>
                   {link.badge > 9 ? '9+' : link.badge}
                 </span>
               )}

@@ -1,22 +1,31 @@
 @import "tailwindcss";
 
 :root {
-  /* Wisper Logística Design System */
+  /* Wisper Logística Official Brand Colors */
+  --wisper-blue: #1F66A5;
+  --wisper-blue-dark: #174D7E;
+  --wisper-blue-light: #3A7FBE;
+  --wisper-red: #E21F26;
+  --wisper-red-dark: #B71C22;
+  --wisper-red-light: #F04D52;
+
+  /* Neutral Colors */
   --background: #fafafa;
   --foreground: #111827;
+  --surface: #ffffff;
+  --border: #e5e7eb;
+  --text-primary: #111827;
+  --text-secondary: #6b7280;
+  --text-tertiary: #9ca3af;
 
-  /* Design Tokens */
-  --color-border: #e5e7eb;
-  --color-text-secondary: #6b7280;
-
-  /* SLA Colors */
+  /* SLA Semantic Colors (keep distinct from brand) */
   --color-sla-green: #10b981;
   --color-sla-green-bg: #d1fae5;
   --color-sla-yellow: #f59e0b;
   --color-sla-yellow-bg: #fef3c7;
   --color-sla-red: #ef4444;
   --color-sla-red-bg: #fee2e2;
-  --color-sla-overdue: #dc2626;
+  --color-sla-overdue: var(--wisper-red);
   --color-sla-overdue-bg: #fecaca;
 }
 
@@ -39,7 +48,12 @@ body {
 }
 
 .btn-primary {
-  @apply px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors;
+  background-color: var(--wisper-blue);
+  @apply px-4 py-2 text-white text-sm font-medium rounded-lg transition-colors;
+}
+
+.btn-primary:hover {
+  background-color: var(--wisper-blue-dark);
 }
 
 .btn-secondary {
@@ -47,7 +61,12 @@ body {
 }
 
 .btn-danger {
-  @apply px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors;
+  background-color: var(--wisper-red);
+  @apply px-4 py-2 text-white text-sm font-medium rounded-lg transition-colors;
+}
+
+.btn-danger:hover {
+  background-color: var(--wisper-red-dark);
 }
 
 .badge {
@@ -56,8 +75,14 @@ body {
 
 .input-field {
   @apply block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm
-         focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20
-         disabled:bg-gray-50 disabled:text-gray-500 transition-colors;
+         focus:outline-none focus:ring-2 transition-colors
+         disabled:bg-gray-50 disabled:text-gray-500;
+  border-color: var(--border);
+}
+
+.input-field:focus {
+  border-color: var(--wisper-blue);
+  box-shadow: 0 0 0 3px rgba(31, 102, 165, 0.1);
 }
 
 .label {

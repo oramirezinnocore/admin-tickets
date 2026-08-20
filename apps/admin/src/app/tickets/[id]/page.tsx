@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import ProtectedLayout from '@/components/ProtectedLayout';
 import Modal from '@/components/ui/Modal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import SearchableSelect from '@/components/ui/SearchableSelect';
+import type { SearchableSelectOption } from '@/components/ui/SearchableSelect';
 import { supabase } from '@/lib/supabase';
 import {
   Ticket,
@@ -470,6 +472,18 @@ function AssignTechnicianModal({
     setTechnicians((data as any) || []);
   }
 
+  // Prepare technician options
+  const technicianOptions: SearchableSelectOption[] = useMemo(
+    () =>
+      technicians.map(tech => ({
+        value: tech.id,
+        label: tech.profile?.full_name || 'Sin nombre',
+        searchText: `${tech.profile?.full_name || ''} ${tech.profile?.email || ''} ${tech.zone || ''}`,
+        secondaryText: [tech.zone, tech.profile?.email].filter(Boolean).join(' · '),
+      })),
+    [technicians]
+  );
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
@@ -482,23 +496,21 @@ function AssignTechnicianModal({
     setSubmitting(true);
 
     try {
-      const updates: any = {
-        technician_id: selectedTechnicianId,
-        assigned_at: new Date().toISOString(),
-      };
+      // Call server-side endpoint to assign and send push notification
+      const response = await fetch(`/api/tickets/${ticket.id}/assign`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          technicianId: selectedTechnicianId,
+        }),
+      });
 
-      // If reassigning or assigning from certain states, set to ASSIGNED
-      if (
-        ticket.status === 'PENDING' ||
-        ticket.status === 'PAUSED' ||
-        ticket.status === 'IN_REVIEW'
-      ) {
-        updates.status = 'ASSIGNED';
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Error al asignar técnico');
       }
-
-      const { error } = await supabase.from('tickets').update(updates).eq('id', ticket.id);
-
-      if (error) throw error;
 
       onSuccess();
     } catch (err: any) {
@@ -525,25 +537,16 @@ function AssignTechnicianModal({
           </div>
         )}
 
-        <div>
-          <label className="block text-sm font-medium mb-1">
-            Técnico <span className="text-red-600">*</span>
-          </label>
-          <select
-            value={selectedTechnicianId}
-            onChange={e => setSelectedTechnicianId(e.target.value)}
-            className="w-full px-3 py-2 border rounded-md"
-            required
-          >
-            <option value="">Seleccionar técnico</option>
-            {technicians.map(tech => (
-              <option key={tech.id} value={tech.id}>
-                {tech.profile?.full_name}
-                {tech.zone && ` - ${tech.zone}`}
-              </option>
-            ))}
-          </select>
-        </div>
+        <SearchableSelect
+          label="Técnico"
+          required
+          placeholder="Seleccionar técnico"
+          value={selectedTechnicianId}
+          options={technicianOptions}
+          onChange={setSelectedTechnicianId}
+          searchPlaceholder="Buscar técnico..."
+          emptyMessage="No se encontraron técnicos"
+        />
 
         <div className="flex gap-3 justify-end pt-4">
           <button

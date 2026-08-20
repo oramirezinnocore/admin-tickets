@@ -1,11 +1,14 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User } from '@supabase/supabase-js';
+import { Alert } from 'react-native';
 import { supabase } from './supabase';
 import { Profile, UserRole } from '@wisper/shared';
+import { registerForPushNotificationsAsync, deactivatePushToken } from './push-notifications';
 
 interface AuthContextType {
   user: User | null;
   profile: Profile | null;
+  technicianId: string | null;
   loading: boolean;
   mustChangePassword: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
@@ -18,6 +21,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [technicianId, setTechnicianId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [mustChangePassword, setMustChangePassword] = useState(false);
 
@@ -59,6 +63,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (error) {
         console.error('Error loading profile:', error);
         setProfile(null);
+        setTechnicianId(null);
         setLoading(false);
         return;
       }
@@ -66,6 +71,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!data) {
         console.error('Profile not found for user:', userId);
         setProfile(null);
+        setTechnicianId(null);
         setLoading(false);
         return;
       }
@@ -73,9 +79,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const profileData = data as Profile;
       setProfile(profileData);
       setMustChangePassword(profileData.must_change_password || false);
+
+      // Get technician ID
+      const { data: techData } = await supabase
+        .from('technicians')
+        .select('id')
+        .eq('profile_id', userId)
+        .single();
+
+      if (techData) {
+        setTechnicianId(techData.id);
+
+        // Register push token (non-blocking)
+        registerForPushNotificationsAsync(techData.id).then((result) => {
+          if (!result.success) {
+            console.warn('[Auth] Push notification setup failed:', result.error);
+            // Don't block login if push fails
+          }
+        });
+      }
     } catch (error) {
       console.error('Unexpected error loading profile:', error);
       setProfile(null);
+      setTechnicianId(null);
       setMustChangePassword(false);
     } finally {
       setLoading(false);
@@ -140,9 +166,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function signOut() {
+    // Deactivate push token
+    if (technicianId) {
+      await deactivatePushToken(technicianId);
+    }
+
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);
+    setTechnicianId(null);
     setMustChangePassword(false);
   }
 
@@ -153,7 +185,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, mustChangePassword, signIn, signOut, refreshProfile }}>
+    <AuthContext.Provider value={{ user, profile, technicianId, loading, mustChangePassword, signIn, signOut, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );

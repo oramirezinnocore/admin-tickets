@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "technician",
+    "name": "Wisper Técnicos",
     "slug": "technician",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -9,16 +9,29 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.jora85.technician",
-      "appleTeamId": "2S64WG24RU"
+      "appleTeamId": "2S64WG24RU",
+      "infoPlist": {
+        "UIBackgroundModes": ["remote-notification"]
+      }
     },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#1F66A5"
+        }
+      ]
+    ],
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#1F66A5",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.wisper.technician"
     },
     "web": {
       "favicon": "./assets/favicon.png"

@@ -1,14 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, RefreshControl, ScrollView } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, RefreshControl, ScrollView, Image } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../services/auth-context';
 import { useLocationTracker } from '../services/location-tracker';
+import { useRealtimeTickets } from '../services/realtime-tickets';
 import { supabase } from '../services/supabase';
 import { getTicketSlaState, TicketSlaState } from '@wisper/shared';
 
 export default function HomeScreen() {
   const navigation = useNavigation();
-  const { profile, signOut } = useAuth();
+  const { profile, technicianId, signOut } = useAuth();
   const { hasPermission } = useLocationTracker();
   const [stats, setStats] = useState({
     closedToday: 0,
@@ -20,13 +21,24 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [technician, setTechnician] = useState<any>(null);
 
+  // Realtime subscription
+  const handleTicketChange = useCallback(() => {
+    console.log('[HomeScreen] Realtime change detected, refreshing stats...');
+    loadStats();
+  }, []);
+
+  useRealtimeTickets({
+    technicianId,
+    onTicketChange: handleTicketChange,
+  });
+
   useFocusEffect(
     React.useCallback(() => {
       loadStats();
     }, [profile])
   );
 
-  async function loadStats() {
+  const loadStats = useCallback(async () => {
     if (!profile) return;
 
     try {
@@ -85,7 +97,7 @@ export default function HomeScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }
+  }, [profile]);
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -99,7 +111,7 @@ export default function HomeScreen() {
   if (loading) {
     return (
       <View style={[styles.container, styles.center]}>
-        <ActivityIndicator size="large" color="#007AFF" />
+        <ActivityIndicator size="large" color="#1F66A5" />
       </View>
     );
   }
@@ -112,7 +124,11 @@ export default function HomeScreen() {
       }
     >
       <View style={styles.header}>
-        <Text style={styles.title}>Wisper Logística</Text>
+        <Image
+          source={require('../../assets/branding/wisper-icon.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
         <Text style={styles.greeting}>Hola, {profile?.full_name}</Text>
         {technician?.zone && (
           <Text style={styles.zone}>Zona: {technician.zone}</Text>
@@ -190,11 +206,10 @@ const styles = StyleSheet.create({
     marginBottom: 30,
     paddingHorizontal: 20,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 8,
+  logo: {
+    width: 48,
+    height: 48,
+    marginBottom: 16,
   },
   greeting: {
     fontSize: 18,
@@ -247,25 +262,25 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   overdueCard: {
-    backgroundColor: '#FEF2F2',
+    backgroundColor: '#FEE2E2',
     borderLeftWidth: 4,
-    borderLeftColor: '#DC2626',
+    borderLeftColor: '#E21F26',
   },
   statNumber: {
     fontSize: 36,
     fontWeight: 'bold',
-    color: '#007AFF',
+    color: '#1F66A5',
     marginBottom: 4,
   },
   overdueNumber: {
-    color: '#DC2626',
+    color: '#E21F26',
   },
   statLabel: {
     fontSize: 16,
     color: '#666',
   },
   button: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#1F66A5',
     paddingVertical: 16,
     borderRadius: 8,
     alignItems: 'center',
@@ -287,16 +302,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   criticalBanner: {
-    backgroundColor: '#FEF2F2',
+    backgroundColor: '#FEE2E2',
     borderLeftWidth: 4,
-    borderLeftColor: '#DC2626',
+    borderLeftColor: '#E21F26',
     padding: 16,
     marginHorizontal: 20,
     marginBottom: 16,
     borderRadius: 8,
   },
   criticalBannerText: {
-    color: '#DC2626',
+    color: '#E21F26',
     fontSize: 14,
     fontWeight: '600',
   },
