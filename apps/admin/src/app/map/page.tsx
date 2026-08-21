@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import ProtectedLayout from '@/components/ProtectedLayout';
 import { supabase } from '@/lib/supabase';
-import { getTicketSlaState, TicketSlaState, formatTicketFolio } from '@wisper/shared';
+import { getTicketSlaState, TicketSlaState, formatTicketFolio, hasValidCoordinates, DEFAULT_MAP_STYLE, MORELIA_CENTER } from '@wisper/shared';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
@@ -102,6 +102,8 @@ export default function MapPage() {
   const [technicians, setTechnicians] = useState<TechnicianWithLocation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [mapLoading, setMapLoading] = useState(true);
+  const [mapError, setMapError] = useState('');
   const [selectedTech, setSelectedTech] = useState<string | null>(null);
   const [tab, setTab] = useState<'locations' | 'route'>('locations');
 
@@ -120,19 +122,42 @@ export default function MapPage() {
   useEffect(() => {
     loadTechnicians();
 
+    // Auto-refresh every 30 seconds
     const interval = setInterval(() => {
       loadTechnicians();
     }, 30000);
 
-    return () => clearInterval(interval);
-  }, []);
+    // Refresh when page becomes visible again
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        loadTechnicians();
+        if (routeTechId) {
+          loadTechnicianTickets(routeTechId);
+        }
+      }
+    };
 
-  useEffect(() => {
-    if (mapContainerRef.current && !mapRef.current) {
-      initMap();
-    }
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [routeTechId]);
+
+  useEffect(() => {
+    // Ensure map is only initialized once when container is ready
+    if (!mapContainerRef.current || mapRef.current) return;
+
+    // Small delay to ensure DOM is fully ready
+    const timer = setTimeout(() => {
+      if (mapContainerRef.current && !mapRef.current) {
+        initMap();
+      }
+    }, 100);
+
+    return () => {
+      clearTimeout(timer);
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
@@ -158,17 +183,95 @@ export default function MapPage() {
   function initMap() {
     if (!mapContainerRef.current) return;
 
-    // Morelia, Michoacán fallback center
-    const map = new maplibregl.Map({
-      container: mapContainerRef.current,
-      style: 'https://tiles.openfreemap.org/styles/liberty',
-      center: [-101.1949, 19.7037],
-      zoom: 12,
-    });
+    console.log('[Map] Initializing map...');
+    console.log('[Map] Style URL:', DEFAULT_MAP_STYLE);
 
-    map.addControl(new maplibregl.NavigationControl(), 'top-right');
+    setMapLoading(true);
+    setMapError('');
 
-    mapRef.current = map;
+    try {
+      const map = new maplibregl.Map({
+        container: mapContainerRef.current,
+        style: DEFAULT_MAP_STYLE,
+        center: MORELIA_CENTER,
+        zoom: 12,
+      });
+
+      console.log('[Map] Map instance created');
+
+      map.addControl(new maplibregl.NavigationControl(), 'top-right');
+
+      // Detailed event logging
+      map.on('styledata', () => {
+        console.log('[Map] EVENT: styledata');
+      });
+
+      map.on('style.load', () => {
+        console.log('[Map] EVENT: style.load - Style loaded successfully');
+      });
+
+      map.on('sourcedata', (e) => {
+        if (e.isSourceLoaded && e.sourceId) {
+          console.log(`[Map] Source loaded: ${e.sourceId}`);
+        }
+      });
+
+      map.on('load', () => {
+        console.log('[Map] EVENT: load - Map fully loaded!');
+        setMapLoading(false);
+
+        // Log loaded sources and layers
+        const style = map.getStyle();
+        console.log('[Map] Sources:', Object.keys(style.sources || {}));
+        console.log('[Map] Layers:', style.layers?.length || 0);
+
+        map.resize();
+      });
+
+      map.on('idle', () => {
+        console.log('[Map] EVENT: idle - Map is idle and tiles rendered');
+      });
+
+      map.on('error', (e) => {
+        console.error('[Map] ERROR event:', e);
+        const errorMessage = e.error?.message || JSON.stringify(e.error) || 'Error desconocido';
+        console.error('[Map] Error details:', errorMessage);
+        setMapError(`No fue posible cargar el mapa: ${errorMessage}`);
+        setMapLoading(false);
+      });
+
+      // Timeout fallback
+      const loadTimeout = setTimeout(() => {
+        console.warn('[Map] Timeout - checking if map is loaded');
+        if (map.loaded && map.loaded()) {
+          console.log('[Map] Map is actually loaded (per map.loaded())');
+          setMapLoading(false);
+        } else {
+          console.error('[Map] Map not loaded after 20 seconds');
+          setMapError('El mapa tardó demasiado en cargar. Verifica la conexión a internet.');
+          setMapLoading(false);
+        }
+      }, 20000);
+
+      map.once('load', () => {
+        console.log('[Map] Clearing timeout - map loaded');
+        clearTimeout(loadTimeout);
+      });
+
+      mapRef.current = map;
+    } catch (err: any) {
+      console.error('[Map] Exception during initialization:', err);
+      setMapError(`Error al inicializar el mapa: ${err.message || String(err)}`);
+      setMapLoading(false);
+    }
+  }
+
+  function handleRetryMap() {
+    if (mapRef.current) {
+      mapRef.current.remove();
+      mapRef.current = null;
+    }
+    initMap();
   }
 
   async function loadTechnicians() {
@@ -245,53 +348,99 @@ export default function MapPage() {
   function updateMarkers() {
     if (!mapRef.current) return;
 
-    // Clear existing markers
-    markersRef.current.forEach(marker => marker.remove());
-    markersRef.current.clear();
+    // Track which technicians we've processed
+    const processedIds = new Set<string>();
 
     technicians.forEach(tech => {
-      if (!tech.location) return;
+      processedIds.add(tech.id);
+
+      // Skip technicians without location
+      if (!tech.location) {
+        // Remove marker if exists (technician lost location)
+        const existingMarker = markersRef.current.get(tech.id);
+        if (existingMarker) {
+          existingMarker.remove();
+          markersRef.current.delete(tech.id);
+        }
+        return;
+      }
 
       const status = getLocationStatus(tech.location.recorded_at);
       const color = getStatusColor(status);
+      const existingMarker = markersRef.current.get(tech.id);
 
-      // Create marker element
-      const el = document.createElement('div');
-      el.className = 'technician-marker';
-      el.style.backgroundColor = color;
-      el.style.width = '24px';
-      el.style.height = '24px';
-      el.style.borderRadius = '50%';
-      el.style.border = '3px solid white';
-      el.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
-      el.style.cursor = 'pointer';
+      if (existingMarker) {
+        // Update existing marker position and color
+        existingMarker.setLngLat([tech.location.longitude, tech.location.latitude]);
 
-      const marker = new maplibregl.Marker({ element: el })
-        .setLngLat([tech.location.longitude, tech.location.latitude])
-        .addTo(mapRef.current!);
+        // Update marker element color
+        const el = existingMarker.getElement();
+        el.style.backgroundColor = color;
 
-      // Create popup
-      const popupContent = `
-        <div style="padding: 8px; min-width: 200px;">
-          <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px;">${tech.profile.full_name}</div>
-          ${tech.zone ? `<div style="font-size: 12px; color: #6b7280; margin-bottom: 4px;">Zona: ${tech.zone}</div>` : ''}
-          ${tech.vehicle ? `<div style="font-size: 12px; color: #6b7280; margin-bottom: 4px;">Vehículo: ${tech.vehicle}</div>` : ''}
-          <div style="font-size: 12px; color: #6b7280; margin-bottom: 4px;">${formatTimeAgo(tech.location.recorded_at)}</div>
-          <div style="display: inline-block; padding: 2px 8px; border-radius: 12px; background-color: ${color}; color: white; font-size: 11px; font-weight: 500;">
-            ${getStatusLabel(status)}
+        // Update popup content
+        const popupContent = `
+          <div style="padding: 8px; min-width: 200px;">
+            <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px;">${tech.profile.full_name}</div>
+            ${tech.zone ? `<div style="font-size: 12px; color: #6b7280; margin-bottom: 4px;">Zona: ${tech.zone}</div>` : ''}
+            ${tech.vehicle ? `<div style="font-size: 12px; color: #6b7280; margin-bottom: 4px;">Vehículo: ${tech.vehicle}</div>` : ''}
+            <div style="font-size: 12px; color: #6b7280; margin-bottom: 4px;">${formatTimeAgo(tech.location.recorded_at)}</div>
+            <div style="display: inline-block; padding: 2px 8px; border-radius: 12px; background-color: ${color}; color: white; font-size: 11px; font-weight: 500;">
+              ${getStatusLabel(status)}
+            </div>
+            <div style="margin-top: 8px;">
+              <a href="https://www.openstreetmap.org/?mlat=${tech.location.latitude}&mlon=${tech.location.longitude}#map=17/${tech.location.latitude}/${tech.location.longitude}" target="_blank" style="color: #007AFF; font-size: 12px; text-decoration: none;">
+                Abrir ubicación →
+              </a>
+            </div>
           </div>
-          <div style="margin-top: 8px;">
-            <a href="https://www.openstreetmap.org/?mlat=${tech.location.latitude}&mlon=${tech.location.longitude}#map=17/${tech.location.latitude}/${tech.location.longitude}" target="_blank" style="color: #007AFF; font-size: 12px; text-decoration: none;">
-              Abrir ubicación →
-            </a>
+        `;
+        existingMarker.setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(popupContent));
+      } else {
+        // Create new marker
+        const el = document.createElement('div');
+        el.className = 'technician-marker';
+        el.style.backgroundColor = color;
+        el.style.width = '24px';
+        el.style.height = '24px';
+        el.style.borderRadius = '50%';
+        el.style.border = '3px solid white';
+        el.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
+        el.style.cursor = 'pointer';
+
+        const marker = new maplibregl.Marker({ element: el })
+          .setLngLat([tech.location.longitude, tech.location.latitude])
+          .addTo(mapRef.current!);
+
+        const popupContent = `
+          <div style="padding: 8px; min-width: 200px;">
+            <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px;">${tech.profile.full_name}</div>
+            ${tech.zone ? `<div style="font-size: 12px; color: #6b7280; margin-bottom: 4px;">Zona: ${tech.zone}</div>` : ''}
+            ${tech.vehicle ? `<div style="font-size: 12px; color: #6b7280; margin-bottom: 4px;">Vehículo: ${tech.vehicle}</div>` : ''}
+            <div style="font-size: 12px; color: #6b7280; margin-bottom: 4px;">${formatTimeAgo(tech.location.recorded_at)}</div>
+            <div style="display: inline-block; padding: 2px 8px; border-radius: 12px; background-color: ${color}; color: white; font-size: 11px; font-weight: 500;">
+              ${getStatusLabel(status)}
+            </div>
+            <div style="margin-top: 8px;">
+              <a href="https://www.openstreetmap.org/?mlat=${tech.location.latitude}&mlon=${tech.location.longitude}#map=17/${tech.location.latitude}/${tech.location.longitude}" target="_blank" style="color: #007AFF; font-size: 12px; text-decoration: none;">
+                Abrir ubicación →
+              </a>
+            </div>
           </div>
-        </div>
-      `;
+        `;
 
-      const popup = new maplibregl.Popup({ offset: 25 }).setHTML(popupContent);
-      marker.setPopup(popup);
+        const popup = new maplibregl.Popup({ offset: 25 }).setHTML(popupContent);
+        marker.setPopup(popup);
 
-      markersRef.current.set(tech.id, marker);
+        markersRef.current.set(tech.id, marker);
+      }
+    });
+
+    // Remove markers for technicians that no longer exist
+    markersRef.current.forEach((marker, techId) => {
+      if (!processedIds.has(techId)) {
+        marker.remove();
+        markersRef.current.delete(techId);
+      }
     });
   }
 
@@ -367,8 +516,8 @@ export default function MapPage() {
 
     result.orderedTicketIds.forEach(ticketId => {
       const ticket = tickets.find(t => t.id === ticketId);
-      if (ticket?.client.latitude && ticket?.client.longitude) {
-        coordinates.push([ticket.client.longitude, ticket.client.latitude]);
+      if (ticket && hasValidCoordinates(ticket.client.latitude, ticket.client.longitude)) {
+        coordinates.push([ticket.client.longitude!, ticket.client.latitude!]);
       }
     });
 
@@ -414,7 +563,7 @@ export default function MapPage() {
     // Add numbered markers
     result.orderedTicketIds.forEach((ticketId, index) => {
       const ticket = tickets.find(t => t.id === ticketId);
-      if (ticket?.client.latitude && ticket?.client.longitude) {
+      if (ticket && hasValidCoordinates(ticket.client.latitude, ticket.client.longitude)) {
         const el = document.createElement('div');
         el.style.backgroundColor = '#007AFF';
         el.style.color = 'white';
@@ -431,7 +580,7 @@ export default function MapPage() {
         el.textContent = (index + 1).toString();
 
         const marker = new maplibregl.Marker({ element: el })
-          .setLngLat([ticket.client.longitude, ticket.client.latitude])
+          .setLngLat([ticket.client.longitude!, ticket.client.latitude!])
           .addTo(mapRef.current!);
 
         routeMarkersRef.current.push(marker);
@@ -499,15 +648,44 @@ export default function MapPage() {
 
         <div className="flex-1 flex overflow-hidden">
           {/* Map */}
-          <div className="flex-1 relative">
-            <div ref={mapContainerRef} className="absolute inset-0" />
-            {loading && (
-              <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-white px-4 py-2 rounded-lg shadow">
-                Cargando...
+          <div className="flex-1 relative bg-gray-100">
+            <div ref={mapContainerRef} className="absolute inset-0 w-full h-full" />
+
+            {/* Map loading state */}
+            {mapLoading && (
+              <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white px-6 py-4 rounded-lg shadow-lg">
+                <div className="flex items-center gap-3">
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                  <div className="text-gray-700">Cargando mapa...</div>
+                </div>
               </div>
             )}
+
+            {/* Map error state */}
+            {mapError && (
+              <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white px-6 py-4 rounded-lg shadow-lg max-w-md">
+                <div className="text-center">
+                  <div className="text-red-600 mb-3">{mapError}</div>
+                  <button
+                    onClick={handleRetryMap}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+                  >
+                    Reintentar
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Technicians loading state */}
+            {loading && (
+              <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-white px-4 py-2 rounded-lg shadow text-sm">
+                Cargando técnicos...
+              </div>
+            )}
+
+            {/* Technicians error */}
             {error && (
-              <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-red-50 text-red-600 px-4 py-2 rounded-lg shadow">
+              <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-red-50 text-red-600 px-4 py-2 rounded-lg shadow text-sm">
                 {error}
               </div>
             )}
@@ -543,6 +721,15 @@ export default function MapPage() {
             <div className="flex-1 overflow-y-auto">
               {tab === 'locations' && (
                 <div className="p-4 space-y-2">
+                  {technicians.length === 0 ? (
+                    <div className="text-center py-12 text-gray-500">
+                      No hay técnicos activos
+                    </div>
+                  ) : technicians.filter(t => t.location).length === 0 ? (
+                    <div className="text-center py-12 text-gray-500">
+                      No hay ubicaciones de técnicos disponibles.
+                    </div>
+                  ) : null}
                   {technicians.map(tech => {
                     const status = tech.location
                       ? getLocationStatus(tech.location.recorded_at)
@@ -629,8 +816,10 @@ export default function MapPage() {
                       <div className="space-y-2 max-h-64 overflow-y-auto">
                         {tickets.map(ticket => {
                           const sla = getTicketSlaState(ticket.created_at);
-                          const hasLocation =
-                            ticket.client.latitude && ticket.client.longitude;
+                          const hasLocation = hasValidCoordinates(
+                            ticket.client.latitude,
+                            ticket.client.longitude
+                          );
 
                           return (
                             <label
@@ -659,8 +848,18 @@ export default function MapPage() {
                                   {ticket.client.address}
                                 </div>
                                 {!hasLocation && (
-                                  <div className="text-xs text-red-600 mt-1">
-                                    Sin ubicación
+                                  <div className="mt-1">
+                                    <div className="text-xs text-red-600">
+                                      Ubicación no configurada
+                                    </div>
+                                    <a
+                                      href={`/clients?edit=${ticket.client.id}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-xs text-blue-600 hover:text-blue-700 underline"
+                                    >
+                                      Configurar ubicación
+                                    </a>
                                   </div>
                                 )}
                                 {(sla === TicketSlaState.RED ||
@@ -677,18 +876,28 @@ export default function MapPage() {
                     </div>
                   )}
 
+                  {/* No technician location warning */}
+                  {routeTechId &&
+                    !technicians.find(t => t.id === routeTechId)?.location && (
+                      <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md text-sm text-yellow-800">
+                        ⚠️ No se puede generar la ruta porque el técnico no tiene una
+                        ubicación registrada.
+                      </div>
+                    )}
+
                   {/* Generate button */}
-                  {tickets.length > 0 && (
-                    <button
-                      onClick={handleOptimizeRoute}
-                      disabled={optimizing || selectedTicketIds.size === 0}
-                      className="w-full px-4 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 transition font-medium"
-                    >
-                      {optimizing
-                        ? 'Generando...'
-                        : `Generar ruta sugerida (${selectedTicketIds.size})`}
-                    </button>
-                  )}
+                  {tickets.length > 0 &&
+                    technicians.find(t => t.id === routeTechId)?.location && (
+                      <button
+                        onClick={handleOptimizeRoute}
+                        disabled={optimizing || selectedTicketIds.size === 0}
+                        className="w-full px-4 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 transition font-medium"
+                      >
+                        {optimizing
+                          ? 'Generando...'
+                          : `Generar ruta sugerida (${selectedTicketIds.size})`}
+                      </button>
+                    )}
 
                   {/* Route result */}
                   {routeResult && (
@@ -766,6 +975,9 @@ export default function MapPage() {
       <style jsx global>{`
         .maplibregl-ctrl-attrib {
           font-size: 11px;
+        }
+        .maplibregl-popup-content {
+          padding: 0;
         }
       `}</style>
     </ProtectedLayout>

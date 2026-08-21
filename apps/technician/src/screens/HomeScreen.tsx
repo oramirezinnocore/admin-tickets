@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, RefreshCon
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../services/auth-context';
 import { useLocationTracker } from '../services/location-tracker';
-import { useRealtimeTickets } from '../services/realtime-tickets';
+import { useTicketRealtime } from '../services/ticket-realtime-provider';
 import { supabase } from '../services/supabase';
 import { getTicketSlaState, TicketSlaState } from '@wisper/shared';
 
@@ -11,6 +11,7 @@ export default function HomeScreen() {
   const navigation = useNavigation();
   const { profile, technicianId, signOut } = useAuth();
   const { hasPermission } = useLocationTracker();
+  const { refreshVersion } = useTicketRealtime();
   const [stats, setStats] = useState({
     closedToday: 0,
     pending: 0,
@@ -21,22 +22,19 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [technician, setTechnician] = useState<any>(null);
 
-  // Realtime subscription
-  const handleTicketChange = useCallback(() => {
-    console.log('[HomeScreen] Realtime change detected, refreshing stats...');
-    loadStats();
-  }, []);
-
-  useRealtimeTickets({
-    technicianId,
-    onTicketChange: handleTicketChange,
-  });
-
   useFocusEffect(
     React.useCallback(() => {
       loadStats();
     }, [profile])
   );
+
+  // Refresh stats when Realtime detects changes
+  useEffect(() => {
+    if (refreshVersion > 0) {
+      console.log('[HomeScreen] Realtime refresh triggered, version:', refreshVersion);
+      loadStats();
+    }
+  }, [refreshVersion]);
 
   const loadStats = useCallback(async () => {
     if (!profile) return;

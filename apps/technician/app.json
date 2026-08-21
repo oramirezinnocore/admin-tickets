@@ -11,7 +11,11 @@
       "bundleIdentifier": "com.jora85.technician",
       "appleTeamId": "2S64WG24RU",
       "infoPlist": {
-        "UIBackgroundModes": ["remote-notification"]
+        "UIBackgroundModes": [
+          "remote-notification",
+          "remote-notification"
+        ],
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "plugins": [
@@ -19,7 +23,10 @@
         "expo-notifications",
         {
           "icon": "./assets/icon.png",
-          "color": "#1F66A5"
+          "color": "#1F66A5",
+          "sounds": [],
+          "androidMode": "default",
+          "androidCollapsedTitle": "#{unread_notifications} notificaciones"
         }
       ]
     ],
@@ -31,7 +38,12 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.wisper.technician"
+      "package": "com.wisper.technician",
+      "permissions": [
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE",
+        "POST_NOTIFICATIONS"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"

@@ -4,8 +4,9 @@ import { useState, useEffect } from 'react';
 import ProtectedLayout from '@/components/ProtectedLayout';
 import Modal from '@/components/ui/Modal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import MapLocationPicker from '@/components/MapLocationPicker';
 import { supabase } from '@/lib/supabase';
-import { Client } from '@wisper/shared';
+import { Client, hasValidCoordinates } from '@wisper/shared';
 
 type ClientFilter = 'active' | 'inactive' | 'all';
 
@@ -24,6 +25,22 @@ export default function ClientsPage() {
   useEffect(() => {
     loadClients();
   }, []);
+
+  // Auto-open edit modal if edit parameter is present in URL
+  useEffect(() => {
+    if (typeof window !== 'undefined' && clients.length > 0) {
+      const params = new URLSearchParams(window.location.search);
+      const editClientId = params.get('edit');
+      if (editClientId) {
+        const client = clients.find(c => c.id === editClientId);
+        if (client) {
+          handleEdit(client);
+          // Clear the URL parameter
+          window.history.replaceState({}, '', '/clients');
+        }
+      }
+    }
+  }, [clients]);
 
   useEffect(() => {
     filterClients();
@@ -203,7 +220,7 @@ export default function ClientsPage() {
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
-                    {client.latitude && client.longitude && (
+                    {hasValidCoordinates(client.latitude, client.longitude) && (
                       <button
                         onClick={() => openInMaps(client.latitude!, client.longitude!)}
                         className="text-blue-600 hover:text-blue-900"
@@ -291,6 +308,7 @@ function ClientFormModal({ isOpen, onClose, onSuccess, client }: ClientFormModal
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [showMapPicker, setShowMapPicker] = useState(false);
 
   useEffect(() => {
     if (client) {
@@ -327,13 +345,23 @@ function ClientFormModal({ isOpen, onClose, onSuccess, client }: ClientFormModal
     setSubmitting(true);
 
     try {
+      // Parse coordinates
+      const lat = formData.latitude ? parseFloat(formData.latitude) : null;
+      const lng = formData.longitude ? parseFloat(formData.longitude) : null;
+
+      // Validate coordinates if provided
+      if ((lat !== null || lng !== null) && !hasValidCoordinates(lat, lng)) {
+        setError('Las coordenadas proporcionadas no son válidas');
+        return;
+      }
+
       const payload: any = {
         name: formData.name.trim(),
         phone: formData.phone.trim() || null,
         address: formData.address.trim(),
         reference: formData.reference.trim() || null,
-        latitude: formData.latitude ? parseFloat(formData.latitude) : null,
-        longitude: formData.longitude ? parseFloat(formData.longitude) : null,
+        latitude: lat,
+        longitude: lng,
       };
 
       if (client) {
@@ -412,27 +440,38 @@ function ClientFormModal({ isOpen, onClose, onSuccess, client }: ClientFormModal
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium mb-1">Latitud</label>
-            <input
-              type="number"
-              step="any"
-              value={formData.latitude}
-              onChange={e => setFormData({ ...formData, latitude: e.target.value })}
-              className="w-full px-3 py-2 border rounded-md"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Longitud</label>
-            <input
-              type="number"
-              step="any"
-              value={formData.longitude}
-              onChange={e => setFormData({ ...formData, longitude: e.target.value })}
-              className="w-full px-3 py-2 border rounded-md"
-            />
-          </div>
+        <div>
+          <label className="block text-sm font-medium mb-2">Ubicación</label>
+          {hasValidCoordinates(
+            formData.latitude ? parseFloat(formData.latitude) : null,
+            formData.longitude ? parseFloat(formData.longitude) : null
+          ) ? (
+            <div className="space-y-2">
+              <div className="p-3 bg-green-50 border border-green-200 rounded-md">
+                <div className="text-sm font-medium text-green-800 mb-1">
+                  ✓ Ubicación configurada
+                </div>
+                <div className="text-xs text-green-700 font-mono">
+                  {parseFloat(formData.latitude).toFixed(6)}, {parseFloat(formData.longitude).toFixed(6)}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMapPicker(true)}
+                className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition text-sm"
+              >
+                Cambiar ubicación
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowMapPicker(true)}
+              className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+            >
+              Seleccionar ubicación en mapa
+            </button>
+          )}
         </div>
 
         <div className="flex gap-3 justify-end pt-4">
@@ -452,6 +491,22 @@ function ClientFormModal({ isOpen, onClose, onSuccess, client }: ClientFormModal
           </button>
         </div>
       </form>
+
+      {showMapPicker && (
+        <MapLocationPicker
+          initialLatitude={formData.latitude ? parseFloat(formData.latitude) : undefined}
+          initialLongitude={formData.longitude ? parseFloat(formData.longitude) : undefined}
+          onLocationSelect={(lat, lng) => {
+            setFormData({
+              ...formData,
+              latitude: lat.toString(),
+              longitude: lng.toString(),
+            });
+            setShowMapPicker(false);
+          }}
+          onCancel={() => setShowMapPicker(false)}
+        />
+      )}
     </Modal>
   );
 }

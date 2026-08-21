@@ -63,6 +63,7 @@ export async function sendTechnicianPush({
       body,
       data,
       priority,
+      channelId: 'tickets', // Android notification channel
     }));
 
     // Send to Expo Push Service

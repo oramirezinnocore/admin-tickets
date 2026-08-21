@@ -24,43 +24,33 @@ CREATE INDEX IF NOT EXISTS idx_technician_push_tokens_active
 -- RLS Policies
 ALTER TABLE technician_push_tokens ENABLE ROW LEVEL SECURITY;
 
--- Helper function to get current technician_id
-CREATE OR REPLACE FUNCTION auth.current_technician_id()
-RETURNS UUID
-LANGUAGE sql
-STABLE
-AS $$
-  SELECT technician_id
-  FROM technicians
-  WHERE profile_id = auth.uid()
-  LIMIT 1;
-$$;
+-- Note: Uses existing current_technician_id() function from initial_schema.sql
 
 -- Technicians can only manage their own tokens
 CREATE POLICY "Technicians can view their own push tokens"
   ON technician_push_tokens
   FOR SELECT
   TO authenticated
-  USING (technician_id = auth.current_technician_id());
+  USING (technician_id = current_technician_id());
 
 CREATE POLICY "Technicians can insert their own push tokens"
   ON technician_push_tokens
   FOR INSERT
   TO authenticated
-  WITH CHECK (technician_id = auth.current_technician_id());
+  WITH CHECK (technician_id = current_technician_id());
 
 CREATE POLICY "Technicians can update their own push tokens"
   ON technician_push_tokens
   FOR UPDATE
   TO authenticated
-  USING (technician_id = auth.current_technician_id())
-  WITH CHECK (technician_id = auth.current_technician_id());
+  USING (technician_id = current_technician_id())
+  WITH CHECK (technician_id = current_technician_id());
 
 CREATE POLICY "Technicians can delete their own push tokens"
   ON technician_push_tokens
   FOR DELETE
   TO authenticated
-  USING (technician_id = auth.current_technician_id());
+  USING (technician_id = current_technician_id());
 
 -- Admins can read all tokens (for server-side push sending)
 CREATE POLICY "Admins can view all push tokens"

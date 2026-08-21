@@ -5,8 +5,8 @@ import { useRouter } from 'next/navigation';
 import ProtectedLayout from '@/components/ProtectedLayout';
 import Modal from '@/components/ui/Modal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
-import SearchableSelect from '@/components/ui/SearchableSelect';
-import type { SearchableSelectOption } from '@/components/ui/SearchableSelect';
+import Combobox from '@/components/ui/Combobox';
+import type { ComboboxOption } from '@/components/ui/Combobox';
 import { supabase } from '@/lib/supabase';
 import {
   Ticket,
@@ -42,6 +42,19 @@ export default function TicketsPage() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [error, setError] = useState('');
   const [, setRefreshCounter] = useState(0);
+
+  // Get unique technicians from tickets (deduplicated by ID)
+  const uniqueTechnicians = useMemo(() => {
+    const techMap = new Map<string, Technician & { profile: Profile }>();
+
+    tickets.forEach(ticket => {
+      if (ticket.technician) {
+        techMap.set(ticket.technician.id, ticket.technician);
+      }
+    });
+
+    return Array.from(techMap.values());
+  }, [tickets]);
 
   useEffect(() => {
     loadTickets();
@@ -242,9 +255,9 @@ export default function TicketsPage() {
           >
             <option value="all">Todos los técnicos</option>
             <option value="unassigned">Sin asignar</option>
-            {Array.from(new Set(tickets.map(t => t.technician).filter(Boolean))).map(tech => (
-              <option key={tech!.id} value={tech!.profile_id}>
-                {tech!.profile?.full_name}
+            {uniqueTechnicians.map(tech => (
+              <option key={tech.id} value={tech.id}>
+                {tech.profile?.full_name || 'Sin nombre'}
               </option>
             ))}
           </select>
@@ -399,7 +412,7 @@ function CreateTicketModal({ isOpen, onClose, onSuccess }: CreateTicketModalProp
   }
 
   // Prepare client options
-  const clientOptions: SearchableSelectOption[] = useMemo(
+  const clientOptions: ComboboxOption[] = useMemo(
     () =>
       clients.map(client => ({
         value: client.id,
@@ -411,8 +424,8 @@ function CreateTicketModal({ isOpen, onClose, onSuccess }: CreateTicketModalProp
   );
 
   // Prepare technician options
-  const technicianOptions: SearchableSelectOption[] = useMemo(() => {
-    const opts: SearchableSelectOption[] = [
+  const technicianOptions: ComboboxOption[] = useMemo(() => {
+    const opts: ComboboxOption[] = [
       {
         value: '',
         label: 'Sin asignar',
@@ -492,14 +505,14 @@ function CreateTicketModal({ isOpen, onClose, onSuccess }: CreateTicketModalProp
           <div className="p-3 bg-red-50 text-red-600 rounded-md text-sm">{error}</div>
         )}
 
-        <SearchableSelect
+        <Combobox
           label="Cliente"
           required
           placeholder="Seleccionar cliente"
+          searchPlaceholder="Buscar por nombre, teléfono o dirección..."
           value={formData.client_id}
           options={clientOptions}
           onChange={value => setFormData({ ...formData, client_id: value })}
-          searchPlaceholder="Buscar cliente..."
           emptyMessage="No se encontraron clientes"
         />
 
@@ -528,13 +541,13 @@ function CreateTicketModal({ isOpen, onClose, onSuccess }: CreateTicketModalProp
           />
         </div>
 
-        <SearchableSelect
+        <Combobox
           label="Técnico (opcional)"
-          placeholder="Seleccionar técnico"
+          placeholder="Sin asignar"
+          searchPlaceholder="Buscar por nombre, correo o zona..."
           value={formData.technician_id}
           options={technicianOptions}
           onChange={value => setFormData({ ...formData, technician_id: value })}
-          searchPlaceholder="Buscar técnico..."
           emptyMessage="No se encontraron técnicos"
         />
 

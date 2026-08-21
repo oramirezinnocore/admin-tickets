@@ -15,6 +15,21 @@ Notifications.setNotificationHandler({
   }),
 });
 
+// Configure Android notification channel
+if (Platform.OS === 'android') {
+  Notifications.setNotificationChannelAsync('tickets', {
+    name: 'Tickets asignados',
+    importance: Notifications.AndroidImportance.HIGH,
+    vibrationPattern: [0, 250, 250, 250],
+    lightColor: '#1F66A5',
+    sound: 'default',
+    enableVibrate: true,
+    showBadge: true,
+  }).catch((error) => {
+    console.warn('[Push] Error creating Android notification channel:', error);
+  });
+}
+
 /**
  * Request notification permissions and register push token
  */
@@ -50,7 +65,7 @@ export async function registerForPushNotificationsAsync(
     const projectId = Constants.expoConfig?.extra?.eas?.projectId;
 
     if (!projectId) {
-      console.error('[Push] No project ID found in config');
+      console.warn('[Push] No project ID found in config');
       return {
         success: false,
         error: 'Error de configuración: projectId no encontrado',
@@ -85,7 +100,7 @@ export async function registerForPushNotificationsAsync(
       );
 
     if (dbError) {
-      console.error('[Push] Error saving token:', dbError);
+      console.warn('[Push] Error saving token:', dbError);
       return {
         success: false,
         error: 'Error al guardar token de notificaciones',
@@ -99,7 +114,7 @@ export async function registerForPushNotificationsAsync(
       token: expoPushToken,
     };
   } catch (error) {
-    console.error('[Push] Error registering for notifications:', error);
+    console.warn('[Push] Error registering for notifications:', error);
     return {
       success: false,
       error: 'Error al registrar notificaciones',
@@ -119,7 +134,7 @@ export async function deactivatePushToken(technicianId: string): Promise<void> {
 
     console.log('[Push] Token deactivated');
   } catch (error) {
-    console.error('[Push] Error deactivating token:', error);
+    console.warn('[Push] Error deactivating token:', error);
   }
 }
 

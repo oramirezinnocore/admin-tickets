@@ -5,8 +5,8 @@ import { useRouter, useParams } from 'next/navigation';
 import ProtectedLayout from '@/components/ProtectedLayout';
 import Modal from '@/components/ui/Modal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
-import SearchableSelect from '@/components/ui/SearchableSelect';
-import type { SearchableSelectOption } from '@/components/ui/SearchableSelect';
+import Combobox from '@/components/ui/Combobox';
+import type { ComboboxOption } from '@/components/ui/Combobox';
 import { supabase } from '@/lib/supabase';
 import {
   Ticket,
@@ -473,7 +473,7 @@ function AssignTechnicianModal({
   }
 
   // Prepare technician options
-  const technicianOptions: SearchableSelectOption[] = useMemo(
+  const technicianOptions: ComboboxOption[] = useMemo(
     () =>
       technicians.map(tech => ({
         value: tech.id,
@@ -537,14 +537,14 @@ function AssignTechnicianModal({
           </div>
         )}
 
-        <SearchableSelect
+        <Combobox
           label="Técnico"
           required
           placeholder="Seleccionar técnico"
+          searchPlaceholder="Buscar por nombre, correo o zona..."
           value={selectedTechnicianId}
           options={technicianOptions}
           onChange={setSelectedTechnicianId}
-          searchPlaceholder="Buscar técnico..."
           emptyMessage="No se encontraron técnicos"
         />
 

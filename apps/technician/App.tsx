@@ -7,6 +7,7 @@ import { View, ActivityIndicator, StyleSheet, Alert } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { AuthProvider, useAuth } from './src/services/auth-context';
 import { LocationTrackerProvider } from './src/services/location-tracker';
+import { TicketRealtimeProvider } from './src/services/ticket-realtime-provider';
 import { setupNotificationListeners, getLastNotificationResponse } from './src/services/push-notifications';
 import LoginScreen from './src/screens/LoginScreen';
 import HomeScreen from './src/screens/HomeScreen';
@@ -123,12 +124,14 @@ export default function App() {
 
   return (
     <AuthProvider>
-      <LocationTrackerProvider>
-        <NavigationContainer ref={navigationRef}>
-          <StatusBar style="auto" />
-          <RootNavigator />
-        </NavigationContainer>
-      </LocationTrackerProvider>
+      <TicketRealtimeProvider>
+        <LocationTrackerProvider>
+          <NavigationContainer ref={navigationRef}>
+            <StatusBar style="auto" />
+            <RootNavigator />
+          </NavigationContainer>
+        </LocationTrackerProvider>
+      </TicketRealtimeProvider>
     </AuthProvider>
   );
 }

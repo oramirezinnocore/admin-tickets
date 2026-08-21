@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../services/auth-context';
-import { useRealtimeTickets } from '../services/realtime-tickets';
+import { useTicketRealtime } from '../services/ticket-realtime-provider';
 import { supabase } from '../services/supabase';
 import {
   Ticket,
@@ -40,6 +40,7 @@ interface AdvancedFilters {
 export default function TicketsScreen() {
   const navigation = useNavigation();
   const { profile, technicianId } = useAuth();
+  const { refreshVersion } = useTicketRealtime();
   const [tickets, setTickets] = useState<TicketWithClient[]>([]);
   const [filteredTickets, setFilteredTickets] = useState<TicketWithClient[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,20 +53,17 @@ export default function TicketsScreen() {
   const [showFiltersModal, setShowFiltersModal] = useState(false);
   const [technician, setTechnician] = useState<any>(null);
 
-  // Realtime subscription
-  const handleTicketChange = useCallback(() => {
-    console.log('[TicketsScreen] Realtime change detected, refreshing...');
-    loadTickets();
-  }, []);
-
-  useRealtimeTickets({
-    technicianId,
-    onTicketChange: handleTicketChange,
-  });
-
   useEffect(() => {
     loadTickets();
   }, [profile]);
+
+  // Refresh tickets when Realtime detects changes
+  useEffect(() => {
+    if (refreshVersion > 0) {
+      console.log('[TicketsScreen] Realtime refresh triggered, version:', refreshVersion);
+      loadTickets();
+    }
+  }, [refreshVersion]);
 
   useEffect(() => {
     filterTickets();
