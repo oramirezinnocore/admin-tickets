@@ -3,8 +3,8 @@
 import { useState, useEffect, useRef } from 'react';
 import ProtectedLayout from '@/components/ProtectedLayout';
 import { supabase } from '@/lib/supabase';
+import { initMapLibre } from '@/lib/maplibre';
 import { getTicketSlaState, TicketSlaState, formatTicketFolio, hasValidCoordinates, DEFAULT_MAP_STYLE, MORELIA_CENTER } from '@wisper/shared';
-import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 interface TechnicianWithLocation {
@@ -98,7 +98,7 @@ function formatTimeAgo(recordedAt: string): string {
 
 export default function MapPage() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<maplibregl.Map | null>(null);
+  const mapRef = useRef<any>(null);
   const [technicians, setTechnicians] = useState<TechnicianWithLocation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -114,8 +114,8 @@ export default function MapPage() {
   const [optimizing, setOptimizing] = useState(false);
   const [routeResult, setRouteResult] = useState<RouteOptimizationResult | null>(null);
 
-  const markersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
-  const routeMarkersRef = useRef<maplibregl.Marker[]>([]);
+  const markersRef = useRef<Map<string, any>>(new Map());
+  const routeMarkersRef = useRef<any[]>([]);
   const routeSourceId = 'route-line';
   const routeLayerId = 'route-line-layer';
 
@@ -146,18 +146,55 @@ export default function MapPage() {
   }, [routeTechId]);
 
   useEffect(() => {
-    // Ensure map is only initialized once when container is ready
     if (!mapContainerRef.current || mapRef.current) return;
 
-    // Small delay to ensure DOM is fully ready
-    const timer = setTimeout(() => {
-      if (mapContainerRef.current && !mapRef.current) {
-        initMap();
+    const initializeMap = async () => {
+      try {
+        const maplibregl = await initMapLibre();
+
+        setTimeout(() => {
+          if (!mapContainerRef.current || mapRef.current) return;
+
+          try {
+            const map = new (maplibregl as any).Map({
+              container: mapContainerRef.current,
+              style: DEFAULT_MAP_STYLE,
+              center: MORELIA_CENTER,
+              zoom: 12,
+            });
+
+            map.addControl(new (maplibregl as any).NavigationControl(), 'top-right');
+
+            map.on('load', () => {
+              console.log('[Map] Map loaded successfully');
+              setMapLoading(false);
+              map.resize();
+            });
+
+            map.on('error', (e: any) => {
+              console.error('[Map] Map error:', e);
+              const errorMessage = e.error?.message || 'Error desconocido';
+              setMapError(`No fue posible cargar el mapa: ${errorMessage}`);
+              setMapLoading(false);
+            });
+
+            mapRef.current = map;
+          } catch (err: any) {
+            console.error('[Map] Failed to initialize:', err);
+            setMapError('Error al inicializar el mapa');
+            setMapLoading(false);
+          }
+        }, 100);
+      } catch (err: any) {
+        console.error('[Map] Failed to load MapLibre:', err);
+        setMapError('Error al cargar MapLibre');
+        setMapLoading(false);
       }
-    }, 100);
+    };
+
+    initializeMap();
 
     return () => {
-      clearTimeout(timer);
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
@@ -179,100 +216,6 @@ export default function MapPage() {
       setSelectedTicketIds(new Set());
     }
   }, [routeTechId]);
-
-  function initMap() {
-    if (!mapContainerRef.current) return;
-
-    console.log('[Map] Initializing map...');
-    console.log('[Map] Style URL:', DEFAULT_MAP_STYLE);
-
-    setMapLoading(true);
-    setMapError('');
-
-    try {
-      const map = new maplibregl.Map({
-        container: mapContainerRef.current,
-        style: DEFAULT_MAP_STYLE,
-        center: MORELIA_CENTER,
-        zoom: 12,
-      });
-
-      console.log('[Map] Map instance created');
-
-      map.addControl(new maplibregl.NavigationControl(), 'top-right');
-
-      // Detailed event logging
-      map.on('styledata', () => {
-        console.log('[Map] EVENT: styledata');
-      });
-
-      map.on('style.load', () => {
-        console.log('[Map] EVENT: style.load - Style loaded successfully');
-      });
-
-      map.on('sourcedata', (e) => {
-        if (e.isSourceLoaded && e.sourceId) {
-          console.log(`[Map] Source loaded: ${e.sourceId}`);
-        }
-      });
-
-      map.on('load', () => {
-        console.log('[Map] EVENT: load - Map fully loaded!');
-        setMapLoading(false);
-
-        // Log loaded sources and layers
-        const style = map.getStyle();
-        console.log('[Map] Sources:', Object.keys(style.sources || {}));
-        console.log('[Map] Layers:', style.layers?.length || 0);
-
-        map.resize();
-      });
-
-      map.on('idle', () => {
-        console.log('[Map] EVENT: idle - Map is idle and tiles rendered');
-      });
-
-      map.on('error', (e) => {
-        console.error('[Map] ERROR event:', e);
-        const errorMessage = e.error?.message || JSON.stringify(e.error) || 'Error desconocido';
-        console.error('[Map] Error details:', errorMessage);
-        setMapError(`No fue posible cargar el mapa: ${errorMessage}`);
-        setMapLoading(false);
-      });
-
-      // Timeout fallback
-      const loadTimeout = setTimeout(() => {
-        console.warn('[Map] Timeout - checking if map is loaded');
-        if (map.loaded && map.loaded()) {
-          console.log('[Map] Map is actually loaded (per map.loaded())');
-          setMapLoading(false);
-        } else {
-          console.error('[Map] Map not loaded after 20 seconds');
-          setMapError('El mapa tardó demasiado en cargar. Verifica la conexión a internet.');
-          setMapLoading(false);
-        }
-      }, 20000);
-
-      map.once('load', () => {
-        console.log('[Map] Clearing timeout - map loaded');
-        clearTimeout(loadTimeout);
-      });
-
-      mapRef.current = map;
-    } catch (err: any) {
-      console.error('[Map] Exception during initialization:', err);
-      setMapError(`Error al inicializar el mapa: ${err.message || String(err)}`);
-      setMapLoading(false);
-    }
-  }
-
-  function handleRetryMap() {
-    if (mapRef.current) {
-      mapRef.current.remove();
-      mapRef.current = null;
-    }
-    initMap();
-  }
 
   async function loadTechnicians() {
     try {
@@ -306,7 +249,8 @@ export default function MapPage() {
       if (mapRef.current && combined.length > 0) {
         const techsWithLocation = combined.filter(t => t.location);
         if (techsWithLocation.length > 0) {
-          const bounds = new maplibregl.LngLatBounds();
+          const maplibregl = await initMapLibre();
+          const bounds = new (maplibregl as any).LngLatBounds();
           techsWithLocation.forEach(tech => {
             if (tech.location) {
               bounds.extend([tech.location.longitude, tech.location.latitude]);
@@ -345,10 +289,10 @@ export default function MapPage() {
     }
   }
 
-  function updateMarkers() {
+  async function updateMarkers() {
     if (!mapRef.current) return;
 
-    // Track which technicians we've processed
+    const maplibregl = await initMapLibre();
     const processedIds = new Set<string>();
 
     technicians.forEach(tech => {
@@ -394,7 +338,7 @@ export default function MapPage() {
             </div>
           </div>
         `;
-        existingMarker.setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(popupContent));
+        existingMarker.setPopup(new (maplibregl as any).Popup({ offset: 25 }).setHTML(popupContent));
       } else {
         // Create new marker
         const el = document.createElement('div');
@@ -407,7 +351,7 @@ export default function MapPage() {
         el.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
         el.style.cursor = 'pointer';
 
-        const marker = new maplibregl.Marker({ element: el })
+        const marker = new (maplibregl as any).Marker({ element: el })
           .setLngLat([tech.location.longitude, tech.location.latitude])
           .addTo(mapRef.current!);
 
@@ -428,7 +372,7 @@ export default function MapPage() {
           </div>
         `;
 
-        const popup = new maplibregl.Popup({ offset: 25 }).setHTML(popupContent);
+        const popup = new (maplibregl as any).Popup({ offset: 25 }).setHTML(popupContent);
         marker.setPopup(popup);
 
         markersRef.current.set(tech.id, marker);
@@ -501,11 +445,12 @@ export default function MapPage() {
     }
   }
 
-  function drawRoute(result: RouteOptimizationResult) {
+  async function drawRoute(result: RouteOptimizationResult) {
     if (!mapRef.current) return;
 
     clearRoute();
 
+    const maplibregl = await initMapLibre();
     const tech = technicians.find(t => t.id === routeTechId);
     if (!tech?.location) return;
 
@@ -523,7 +468,7 @@ export default function MapPage() {
 
     // Add GeoJSON source
     if (mapRef.current.getSource(routeSourceId)) {
-      (mapRef.current.getSource(routeSourceId) as maplibregl.GeoJSONSource).setData({
+      (mapRef.current.getSource(routeSourceId) as any).setData({
         type: 'Feature',
         properties: {},
         geometry: {
@@ -579,7 +524,7 @@ export default function MapPage() {
         el.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
         el.textContent = (index + 1).toString();
 
-        const marker = new maplibregl.Marker({ element: el })
+        const marker = new (maplibregl as any).Marker({ element: el })
           .setLngLat([ticket.client.longitude!, ticket.client.latitude!])
           .addTo(mapRef.current!);
 
@@ -589,7 +534,8 @@ export default function MapPage() {
 
     // Fit bounds to route
     if (coordinates.length > 1) {
-      const bounds = new maplibregl.LngLatBounds();
+      const maplibregl = await initMapLibre();
+      const bounds = new (maplibregl as any).LngLatBounds();
       coordinates.forEach(coord => bounds.extend(coord));
       mapRef.current.fitBounds(bounds, { padding: 50 });
     }
@@ -666,12 +612,6 @@ export default function MapPage() {
               <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white px-6 py-4 rounded-lg shadow-lg max-w-md">
                 <div className="text-center">
                   <div className="text-red-600 mb-3">{mapError}</div>
-                  <button
-                    onClick={handleRetryMap}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
-                  >
-                    Reintentar
-                  </button>
                 </div>
               </div>
             )}

@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { hasValidCoordinates, DEFAULT_MAP_STYLE, MORELIA_CENTER } from '@wisper/shared';
+import { initMapLibre } from '@/lib/maplibre';
 
 interface MapLocationPickerProps {
   initialLatitude?: number;
@@ -19,8 +19,8 @@ export default function MapLocationPicker({
   onCancel,
 }: MapLocationPickerProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<maplibregl.Map | null>(null);
-  const markerRef = useRef<maplibregl.Marker | null>(null);
+  const mapRef = useRef<any>(null);
+  const markerRef = useRef<any>(null);
   const [latitude, setLatitude] = useState(initialLatitude || MORELIA_CENTER[1]);
   const [longitude, setLongitude] = useState(initialLongitude || MORELIA_CENTER[0]);
   const [mapLoading, setMapLoading] = useState(true);
@@ -32,18 +32,22 @@ export default function MapLocationPicker({
     setMapLoading(true);
     setMapError('');
 
-    const timer = setTimeout(() => {
-      if (!mapContainerRef.current || mapRef.current) return;
-
+    const loadAndInitMap = async () => {
       try {
-        const map = new maplibregl.Map({
+        const maplibregl = await initMapLibre();
+
+        setTimeout(() => {
+          if (!mapContainerRef.current || mapRef.current) return;
+
+          try {
+            const map = new (maplibregl as any).Map({
           container: mapContainerRef.current,
           style: DEFAULT_MAP_STYLE,
           center: [longitude, latitude],
           zoom: initialLatitude && initialLongitude ? 15 : 12,
         });
 
-        map.addControl(new maplibregl.NavigationControl(), 'top-right');
+          map.addControl(new (maplibregl as any).NavigationControl(), 'top-right');
 
         map.on('load', () => {
           console.log('[MapLocationPicker] Map loaded');
@@ -51,7 +55,7 @@ export default function MapLocationPicker({
           map.resize();
         });
 
-        map.on('error', (e) => {
+        map.on('error', (e: any) => {
           console.error('[MapLocationPicker] Map error:', e);
           const errorMessage = e.error?.message || 'Error desconocido';
           setMapError(`No fue posible cargar el mapa: ${errorMessage}`);
@@ -70,39 +74,46 @@ export default function MapLocationPicker({
           clearTimeout(loadTimeout);
         });
 
-        // Create initial marker
-        const marker = new maplibregl.Marker({
-          draggable: true,
-          color: '#007AFF',
-        })
-          .setLngLat([longitude, latitude])
-          .addTo(map);
+          // Create initial marker
+          const marker = new (maplibregl as any).Marker({
+            draggable: true,
+            color: '#007AFF',
+          })
+            .setLngLat([longitude, latitude])
+            .addTo(map);
 
-        // Update coordinates when marker is dragged
-        marker.on('dragend', () => {
-          const lngLat = marker.getLngLat();
-          setLatitude(lngLat.lat);
-          setLongitude(lngLat.lng);
-        });
+          // Update coordinates when marker is dragged
+          marker.on('dragend', () => {
+            const lngLat = marker.getLngLat();
+            setLatitude(lngLat.lat);
+            setLongitude(lngLat.lng);
+          });
 
-        // Update marker position on map click
-        map.on('click', (e) => {
-          marker.setLngLat([e.lngLat.lng, e.lngLat.lat]);
-          setLatitude(e.lngLat.lat);
-          setLongitude(e.lngLat.lng);
-        });
+          // Update marker position on map click
+          map.on('click', (e: any) => {
+            marker.setLngLat([e.lngLat.lng, e.lngLat.lat]);
+            setLatitude(e.lngLat.lat);
+            setLongitude(e.lngLat.lng);
+          });
 
-        mapRef.current = map;
-        markerRef.current = marker;
-      } catch (err) {
-        console.error('[MapLocationPicker] Failed to initialize:', err);
-        setMapError('Error al inicializar el mapa');
-        setMapLoading(false);
-      }
-    }, 100);
+          mapRef.current = map;
+          markerRef.current = marker;
+        } catch (err: any) {
+          console.error('[MapLocationPicker] Failed to initialize:', err);
+          setMapError('Error al inicializar el mapa');
+          setMapLoading(false);
+        }
+      }, 100);
+    } catch (err: any) {
+      console.error('[MapLocationPicker] Failed to load MapLibre:', err);
+      setMapError('Error al cargar MapLibre');
+      setMapLoading(false);
+    }
+    };
+
+    loadAndInitMap();
 
     return () => {
-      clearTimeout(timer);
       if (markerRef.current) {
         markerRef.current.remove();
       }
@@ -114,7 +125,7 @@ export default function MapLocationPicker({
     };
   }, []);
 
-  function handleRetryMap() {
+  async function handleRetryMap() {
     if (mapRef.current) {
       mapRef.current.remove();
       mapRef.current = null;
@@ -123,62 +134,68 @@ export default function MapLocationPicker({
       markerRef.current.remove();
       markerRef.current = null;
     }
-    // Trigger re-initialization by updating a key or similar
-    // For now, we'll just show the error - user can cancel and reopen
     setMapError('');
     setMapLoading(true);
 
-    setTimeout(() => {
-      if (!mapContainerRef.current || mapRef.current) return;
+    try {
+      const maplibregl = await initMapLibre();
 
-      try {
-        const map = new maplibregl.Map({
+      setTimeout(() => {
+        if (!mapContainerRef.current || mapRef.current) return;
+
+        try {
+          const map = new (maplibregl as any).Map({
           container: mapContainerRef.current,
           style: DEFAULT_MAP_STYLE,
           center: [longitude, latitude],
           zoom: initialLatitude && initialLongitude ? 15 : 12,
         });
 
-        map.addControl(new maplibregl.NavigationControl(), 'top-right');
+          map.addControl(new (maplibregl as any).NavigationControl(), 'top-right');
 
-        map.on('load', () => {
+          map.on('load', () => {
+            setMapLoading(false);
+            map.resize();
+          });
+
+          map.on('error', (e: any) => {
+            console.error('[MapLocationPicker] Map error:', e);
+            setMapError('No fue posible cargar el mapa');
+            setMapLoading(false);
+          });
+
+          const marker = new (maplibregl as any).Marker({
+            draggable: true,
+            color: '#007AFF',
+          })
+            .setLngLat([longitude, latitude])
+            .addTo(map);
+
+          marker.on('dragend', () => {
+            const lngLat = marker.getLngLat();
+            setLatitude(lngLat.lat);
+            setLongitude(lngLat.lng);
+          });
+
+          map.on('click', (e: any) => {
+            marker.setLngLat([e.lngLat.lng, e.lngLat.lat]);
+            setLatitude(e.lngLat.lat);
+            setLongitude(e.lngLat.lng);
+          });
+
+          mapRef.current = map;
+          markerRef.current = marker;
+        } catch (err: any) {
+          console.error('[MapLocationPicker] Retry failed:', err);
+          setMapError('Error al inicializar el mapa');
           setMapLoading(false);
-          map.resize();
-        });
-
-        map.on('error', (e) => {
-          console.error('[MapLocationPicker] Map error:', e);
-          setMapError('No fue posible cargar el mapa');
-          setMapLoading(false);
-        });
-
-        const marker = new maplibregl.Marker({
-          draggable: true,
-          color: '#007AFF',
-        })
-          .setLngLat([longitude, latitude])
-          .addTo(map);
-
-        marker.on('dragend', () => {
-          const lngLat = marker.getLngLat();
-          setLatitude(lngLat.lat);
-          setLongitude(lngLat.lng);
-        });
-
-        map.on('click', (e) => {
-          marker.setLngLat([e.lngLat.lng, e.lngLat.lat]);
-          setLatitude(e.lngLat.lat);
-          setLongitude(e.lngLat.lng);
-        });
-
-        mapRef.current = map;
-        markerRef.current = marker;
-      } catch (err) {
-        console.error('[MapLocationPicker] Retry failed:', err);
-        setMapError('Error al inicializar el mapa');
-        setMapLoading(false);
-      }
-    }, 100);
+        }
+      }, 100);
+    } catch (err: any) {
+      console.error('[MapLocationPicker] Failed to load MapLibre on retry:', err);
+      setMapError('Error al cargar MapLibre');
+      setMapLoading(false);
+    }
   }
 
   function handleConfirm() {
