@@ -14,11 +14,13 @@
     "lint": "npm run lint --workspaces",
     "type-check": "npm run type-check --workspaces",
     "create-admin": "node scripts/create-admin.mjs",
+    "bootstrap:super-admin": "node scripts/bootstrap-super-admin.mjs",
     "health-check": "node scripts/health-check.mjs",
     "seed:e2e": "node scripts/seed-e2e.mjs",
     "test:sla": "node scripts/test-sla.mjs",
     "test:rls": "node scripts/test-rls.mjs",
     "test:storage": "node scripts/test-storage.mjs",
+    "test:bootstrap": "node scripts/test-bootstrap-super-admin.mjs",
     "test:e2e": "npm run health-check && npm run test:sla && npm run test:rls && npm run test:storage"
   },
   "dependencies": {

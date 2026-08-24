@@ -38,6 +38,8 @@ yarn-error.log*
 .env.test.local
 .env.production.local
 .env.admin.local
+.env.bootstrap
+.env.bootstrap.secure
 
 # IDE
 .vscode/
