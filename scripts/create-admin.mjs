@@ -78,10 +78,10 @@ async function createAdmin() {
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
-    // Update profile role to ADMIN and ensure must_change_password is false
+    // Update profile role to SUPER_ADMIN and ensure must_change_password is false
     const { error: profileError } = await supabase
       .from('profiles')
-      .update({ role: 'ADMIN', full_name: adminFullName, must_change_password: false })
+      .update({ role: 'SUPER_ADMIN', full_name: adminFullName, must_change_password: false })
       .eq('id', userId);
 
     if (profileError) {
@@ -89,11 +89,11 @@ async function createAdmin() {
       process.exit(1);
     }
 
-    console.log('✅ Profile updated to ADMIN role');
+    console.log('✅ Profile updated to SUPER_ADMIN role');
     console.log('');
-    console.log('🎉 Admin user ready!');
+    console.log('🎉 Super Admin user ready!');
     console.log('   Email:', adminEmail);
-    console.log('   Role: ADMIN');
+    console.log('   Role: SUPER_ADMIN');
 
   } catch (error) {
     console.error('❌ Unexpected error:', error);

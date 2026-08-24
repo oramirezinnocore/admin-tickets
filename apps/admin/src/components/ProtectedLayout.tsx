@@ -5,7 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useAuth } from '@/lib/auth-context';
-import { UserRole, getTicketSlaState, TicketSlaState } from '@wisper/shared';
+import { UserRole, getTicketSlaState, TicketSlaState, isAnyAdmin, canManageAdministrators } from '@wisper/shared';
 import { supabase } from '@/lib/supabase';
 
 export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
@@ -16,7 +16,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
     if (!loading) {
       if (!user || !profile) {
         router.push('/login');
-      } else if (profile.role !== UserRole.ADMIN) {
+      } else if (!isAnyAdmin(profile.role)) {
         signOut().then(() => {
           router.push('/login');
         });
@@ -32,7 +32,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
     );
   }
 
-  if (!user || !profile || profile.role !== UserRole.ADMIN) {
+  if (!user || !profile || !isAnyAdmin(profile.role)) {
     return null;
   }
 
@@ -93,6 +93,11 @@ function Header() {
     { href: '/map', label: 'Mapa' },
   ];
 
+  // Add Administrators link only for SUPER_ADMIN
+  if (profile && canManageAdministrators(profile.role)) {
+    navLinks.push({ href: '/administrators', label: 'Administradores' });
+  }
+
   return (
     <header className="bg-white border-b border-gray-200">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -117,7 +122,9 @@ function Header() {
               </div>
               <div className="hidden sm:block text-right">
                 <p className="text-sm font-medium text-gray-900">{profile?.full_name}</p>
-                <p className="text-xs text-gray-500">Administrador</p>
+                <p className="text-xs text-gray-500">
+                  {profile?.role === UserRole.SUPER_ADMIN ? 'Super Administrador' : 'Administrador'}
+                </p>
               </div>
             </div>
 

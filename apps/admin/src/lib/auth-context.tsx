@@ -1,9 +1,10 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
 import { User } from '@supabase/supabase-js';
 import { supabase } from './supabase';
-import { Profile, UserRole } from '@wisper/shared';
+import { Profile, isAnyAdmin } from '@wisper/shared';
 
 interface AuthContextType {
   user: User | null;
@@ -11,11 +12,14 @@ interface AuthContextType {
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -78,6 +82,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  async function refreshProfile() {
+    if (user) {
+      await loadProfile(user.id);
+    }
+  }
+
   async function signIn(email: string, password: string) {
     try {
       setLoading(true);
@@ -109,8 +119,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { error: 'Profile not found. Please contact support.' };
       }
 
-      // Check if user is ADMIN
-      if (profileData.role !== UserRole.ADMIN) {
+      // Check if user is ADMIN or SUPER_ADMIN
+      if (!isAnyAdmin(profileData.role)) {
         await supabase.auth.signOut();
         setLoading(false);
         return { error: 'Este usuario no tiene acceso al panel administrativo.' };
@@ -120,7 +130,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!profileData.is_active) {
         await supabase.auth.signOut();
         setLoading(false);
-        return { error: 'Esta cuenta ha sido desactivada. Contacta al administrador.' };
+        return { error: 'Tu cuenta está desactivada. Contacta al superadministrador.' };
       }
 
       setProfile(profileData as Profile);
@@ -139,8 +149,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setProfile(null);
   }
 
+  // Redirect logic for must_change_password and is_active
+  useEffect(() => {
+    if (loading || !user || !profile) return;
+
+    // Check if user became inactive
+    if (!profile.is_active) {
+      signOut().then(() => {
+        router.push('/login');
+      });
+      return;
+    }
+
+    // Skip redirect if already on /change-password or /login
+    if (pathname === '/change-password' || pathname === '/login') {
+      return;
+    }
+
+    // Redirect to change password if needed
+    if (profile.must_change_password) {
+      router.push('/change-password');
+    }
+  }, [profile, loading, user, pathname, router]);
+
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, profile, loading, signIn, signOut, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );
