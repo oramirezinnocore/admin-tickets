@@ -1,0 +1,59 @@
+# ============================================
+# DOCKER COMPOSE PRODUCTION - TICKETING ADMIN
+# ============================================
+# Production configuration for Ticketing Admin app
+# Domain: https://ticketing.intuspath.com
+# VPS Architecture:
+#   Internet → Nginx (443) → 127.0.0.1:3004 → Docker → Next.js (3000)
+# ============================================
+
+services:
+  admin:
+    container_name: ticketing-admin
+    build:
+      context: .
+      dockerfile: Dockerfile.production
+      args:
+        # Build-time variables (NEXT_PUBLIC_*)
+        # These are baked into the client-side JavaScript bundle
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+
+    # CRITICAL: Bind to 127.0.0.1 ONLY (not 0.0.0.0)
+    # This prevents direct public access - only accessible via Nginx reverse proxy
+    ports:
+      - "127.0.0.1:3004:3000"
+
+    # Runtime environment variables (server-side only)
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - ROUTING_BASE_URL=${ROUTING_BASE_URL:-https://router.project-osrm.org}
+      - GEOCODING_BASE_URL=${GEOCODING_BASE_URL:-https://photon.komoot.io}
+
+    # Restart policy for production reliability
+    restart: unless-stopped
+
+    # Health check configuration
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    # Resource limits (adjust based on VPS capacity)
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+# No volumes needed - stateless application
+# No networks needed - default bridge network is sufficient
+# No database service - Supabase is external

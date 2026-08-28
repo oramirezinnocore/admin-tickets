@@ -1,0 +1,118 @@
+# ============================================
+# DOCKERIGNORE - TICKETING ADMIN
+# ============================================
+# Exclude files/directories from Docker build context
+# Reduces build time and image size
+# ============================================
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dependencies (will be installed during build)
+node_modules/
+.pnp
+.pnp.js
+
+# Next.js build output (will be generated during build)
+.next/
+out/
+apps/admin/.next/
+apps/admin/out/
+
+# Expo (not needed for Docker - mobile app only)
+.expo/
+.expo-shared/
+apps/technician/.expo/
+
+# Testing
+coverage/
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+__tests__/
+**/__tests__/
+
+# Environment files (CRITICAL: never copy secrets into image)
+.env
+.env*
+!.env.production.example
+.env.local
+.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.production
+.env.admin.local
+.env.bootstrap
+.env.bootstrap.secure
+.demo-credentials.local
+
+# Build artifacts
+dist/
+build/
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Supabase (local development only)
+supabase/.branches/
+supabase/.temp/
+
+# Scripts (deployment scripts not needed in image)
+deploy-production.sh
+update-production.sh
+scripts/create-admin.mjs
+scripts/bootstrap-super-admin.mjs
+scripts/health-check.mjs
+scripts/seed-e2e.mjs
+scripts/test-*.mjs
+
+# Docker files (not needed inside image)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Mobile certificates (not needed for web deployment)
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# Other
+.claude/
