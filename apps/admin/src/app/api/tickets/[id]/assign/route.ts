@@ -1,18 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import { sendTicketAssignedPush } from '@/lib/send-technician-push';
 import { getTicketSlaState, TicketSlaState, formatTicketFolio } from '@wisper/shared';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+import { getSupabaseAdmin } from '@/lib/supabase-admin';
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // Get Supabase admin client (lazy initialization at runtime)
+    const supabaseAdmin = getSupabaseAdmin();
+
     const { id: ticketId } = await params;
     const { technicianId } = await request.json();
 

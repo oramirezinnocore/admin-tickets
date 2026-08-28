@@ -3,13 +3,7 @@
  * Uses Expo Push Notification Service
  */
 
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-// Use service role for reading push tokens
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+import { getSupabaseAdmin } from './supabase-admin';
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 
@@ -38,6 +32,9 @@ export async function sendTechnicianPush({
   priority = 'high',
 }: SendPushOptions): Promise<{ success: boolean; error?: string }> {
   try {
+    // Get Supabase admin client (lazy initialization at runtime)
+    const supabaseAdmin = getSupabaseAdmin();
+
     // Get active push tokens for technician
     const { data: tokens, error: tokensError } = await supabaseAdmin
       .from('technician_push_tokens')
