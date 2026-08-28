@@ -30,21 +30,14 @@ FROM node:22.19.0-alpine AS builder
 WORKDIR /app
 
 # Copy dependencies from deps stage
+# npm workspaces hoists dependencies to root node_modules
+# NO workspace-level node_modules are created
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/apps/admin/node_modules ./apps/admin/node_modules
-COPY --from=deps /app/packages/shared/node_modules ./packages/shared/node_modules
 
 # Copy source code
 COPY package.json package-lock.json ./
-COPY apps/admin ./apps/admin
-COPY packages/shared ./packages/shared
-
-# Build shared package first
-WORKDIR /app/packages/shared
-RUN npm run build
-
-# Build admin app
-WORKDIR /app/apps/admin
+COPY apps ./apps
+COPY packages ./packages
 
 # CRITICAL: prebuild hook MUST run to copy MapLibre worker assets
 # This is executed automatically by npm run build via prebuild script
@@ -55,12 +48,15 @@ ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
 ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
 ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
 
-# Build Next.js with standalone output
+# Build shared package first (from root, using workspace)
+RUN npm run build --workspace=packages/shared
+
+# Build admin app (from root, using workspace)
 # This will:
 # 1. Run prebuild hook (copy MapLibre worker)
 # 2. Build Next.js app
 # 3. Generate .next/standalone directory
-RUN npm run build
+RUN npm run build --workspace=apps/admin
 
 # ============================================
 # Stage 3: Runner (Production)
