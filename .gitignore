@@ -52,3 +52,6 @@ yarn-error.log*
 # TypeScript
 *.tsbuildinfo
 .demo-credentials.local
+
+# Firebase Service Account private keys (NEVER commit)
+*firebase-adminsdk*.json

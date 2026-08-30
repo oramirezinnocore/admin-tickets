@@ -39,6 +39,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.wisper.technician",
+      "googleServicesFile": "./google-services.json",
       "permissions": [
         "RECEIVE_BOOT_COMPLETED",
         "VIBRATE",

@@ -26,6 +26,9 @@ import {
   getSignedUrl,
   deleteEvidence,
 } from '../services/storage-helper';
+import { addTechnicianNote } from '../services/ticket-activity';
+import ActivitySummaryCard from '../components/ActivitySummaryCard';
+import ActivityBottomSheet from '../components/ActivityBottomSheet';
 import {
   Ticket,
   Client,
@@ -55,11 +58,15 @@ export default function TicketDetailScreen() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
 
-  const [technicianNotes, setTechnicianNotes] = useState('');
+  const [newNote, setNewNote] = useState('');
+  const [addingNote, setAddingNote] = useState(false);
   const [solutionText, setSolutionText] = useState('');
 
+  const [showActivitySheet, setShowActivitySheet] = useState(false);
   const [showSignatureModal, setShowSignatureModal] = useState(false);
   const [signedByName, setSignedByName] = useState('');
+  const [hasSignatureStrokes, setHasSignatureStrokes] = useState(false);
+  const [savingSignature, setSavingSignature] = useState(false);
   const signatureRef = useRef<any>(null);
 
   useEffect(() => {
@@ -82,7 +89,6 @@ export default function TicketDetailScreen() {
 
       if (error) throw error;
       setTicket(ticketData as any);
-      setTechnicianNotes(ticketData.technician_notes || '');
       setSolutionText(ticketData.solution_text || '');
       setSignedByName(ticketData.client?.name || '');
 
@@ -142,27 +148,30 @@ export default function TicketDetailScreen() {
     }
   }
 
-  async function handleSaveProgress() {
-    if (!ticket) return;
+  async function handleAddNote() {
+    if (!ticket || !profile) return;
+
+    const trimmedNote = newNote.trim();
+    if (!trimmedNote) {
+      Alert.alert('Error', 'Escribe una observación antes de guardar');
+      return;
+    }
 
     try {
-      setSaving(true);
+      setAddingNote(true);
 
-      const { error } = await supabase
-        .from('tickets')
-        .update({
-          technician_notes: technicianNotes.trim() || null,
-          solution_text: solutionText.trim() || null,
-        })
-        .eq('id', ticketId);
+      const result = await addTechnicianNote(ticketId, trimmedNote, profile.id);
 
-      if (error) throw error;
+      if (!result.success) {
+        throw new Error(result.error);
+      }
 
-      Alert.alert('Éxito', 'Progreso guardado');
+      setNewNote(''); // Clear textarea
+      Alert.alert('Éxito', 'Observación agregada');
     } catch (error: any) {
-      Alert.alert('Error', error.message);
+      Alert.alert('Error', error.message || 'No se pudo agregar la observación');
     } finally {
-      setSaving(false);
+      setAddingNote(false);
     }
   }
 
@@ -176,6 +185,7 @@ export default function TicketDetailScreen() {
         try {
           setSaving(true);
 
+          // Update status - trigger will log to history automatically
           const { error } = await supabase
             .from('tickets')
             .update({ status: 'PAUSED' })
@@ -183,13 +193,17 @@ export default function TicketDetailScreen() {
 
           if (error) throw error;
 
-          // Add note to history
-          await supabase.from('ticket_status_history').insert({
-            ticket_id: ticketId,
-            previous_status: 'IN_REVIEW',
-            new_status: 'PAUSED',
-            notes: reason.trim(),
-          });
+          // Optionally update the auto-generated history record with notes
+          // Note: This updates the most recent history entry for this ticket
+          if (reason.trim()) {
+            await supabase
+              .from('ticket_status_history')
+              .update({ notes: reason.trim() })
+              .eq('ticket_id', ticketId)
+              .eq('new_status', 'PAUSED')
+              .order('created_at', { ascending: false })
+              .limit(1);
+          }
 
           await loadTicket();
           Alert.alert('Éxito', 'Ticket pausado');
@@ -329,18 +343,61 @@ export default function TicketDetailScreen() {
   }
 
   async function handleCaptureSignature() {
-    setShowSignatureModal(true);
+    // If signature already exists, confirm replacement
+    if (signature) {
+      Alert.alert(
+        'Reemplazar firma',
+        '¿Estás seguro de que deseas capturar una nueva firma? Esto reemplazará la firma existente.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Reemplazar',
+            style: 'destructive',
+            onPress: () => {
+              setHasSignatureStrokes(false);
+              setShowSignatureModal(true);
+            },
+          },
+        ]
+      );
+    } else {
+      setHasSignatureStrokes(false);
+      setShowSignatureModal(true);
+    }
   }
 
-  async function handleSignatureOK(signature: string) {
-    try {
-      setUploading(true);
-      setShowSignatureModal(false);
+  function handleClearSignature() {
+    signatureRef.current?.clearSignature();
+    setHasSignatureStrokes(false);
+  }
 
-      if (!signedByName.trim()) {
-        Alert.alert('Error', 'Ingresa el nombre de quien firma');
-        return;
-      }
+  function handleSignatureBegin() {
+    setHasSignatureStrokes(true);
+  }
+
+  function handleCancelSignature() {
+    setShowSignatureModal(false);
+    setHasSignatureStrokes(false);
+  }
+
+  async function handleConfirmSignature() {
+    if (!hasSignatureStrokes) {
+      Alert.alert('Error', 'Dibuja la firma antes de confirmar');
+      return;
+    }
+
+    if (!signedByName.trim()) {
+      Alert.alert('Error', 'Ingresa el nombre de quien firma antes de capturar la firma');
+      return;
+    }
+
+    // Trigger signature generation
+    signatureRef.current?.readSignature();
+  }
+
+  async function handleSignatureOK(signatureData: string) {
+    try {
+      setSavingSignature(true);
 
       // Get location
       let location = null;
@@ -360,7 +417,7 @@ export default function TicketDetailScreen() {
       // Upload signature
       const result = await uploadSignature(
         ticketId,
-        signature,
+        signatureData,
         signedByName.trim(),
         location?.latitude || null,
         location?.longitude || null
@@ -370,12 +427,27 @@ export default function TicketDetailScreen() {
         throw new Error(result.error);
       }
 
+      // Close modal and reload
+      setShowSignatureModal(false);
+      setHasSignatureStrokes(false);
       await loadTicket();
+
+      // Success feedback
       Alert.alert('Éxito', 'Firma capturada');
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'No se pudo guardar la firma');
+      console.error('[Signature] Error details:', error);
+
+      // User-friendly error message (hide technical RLS errors)
+      let userMessage = 'No se pudo guardar la firma. La firma dibujada se conserva, puedes intentar nuevamente.';
+
+      // Don't show raw RLS errors to user
+      if (error.message && !error.message.includes('row-level security')) {
+        userMessage = error.message;
+      }
+
+      Alert.alert('Error al guardar', userMessage, [{ text: 'OK' }]);
     } finally {
-      setUploading(false);
+      setSavingSignature(false);
     }
   }
 
@@ -418,7 +490,6 @@ export default function TicketDetailScreen() {
                 .update({
                   status: 'RESOLVED',
                   closed_at: new Date().toISOString(),
-                  technician_notes: technicianNotes.trim() || null,
                   solution_text: solutionText.trim(),
                 })
                 .eq('id', ticketId);
@@ -554,6 +625,14 @@ export default function TicketDetailScreen() {
         <Text style={styles.text}>{ticket.failure_type}</Text>
       </View>
 
+      {/* Activity Summary */}
+      {!isReadOnly && (
+        <ActivitySummaryCard
+          ticketId={ticketId}
+          onPressViewAll={() => setShowActivitySheet(true)}
+        />
+      )}
+
       {ticket.admin_notes && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Observaciones (admin)</Text>
@@ -561,17 +640,29 @@ export default function TicketDetailScreen() {
         </View>
       )}
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Observaciones del técnico</Text>
-        <TextInput
-          style={styles.textArea}
-          multiline
-          value={technicianNotes}
-          onChangeText={setTechnicianNotes}
-          placeholder="Agrega tus observaciones..."
-          editable={!isReadOnly}
-        />
-      </View>
+      {/* Add Note Section */}
+      {!isReadOnly && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Agregar actualización</Text>
+          <TextInput
+            style={styles.textArea}
+            multiline
+            value={newNote}
+            onChangeText={setNewNote}
+            placeholder="Escribe una actualización sobre el trabajo realizado..."
+            editable={!isReadOnly}
+          />
+          <TouchableOpacity
+            style={[styles.secondaryButton, { marginTop: 12, margin: 0 }]}
+            onPress={handleAddNote}
+            disabled={addingNote || !newNote.trim()}
+          >
+            <Text style={styles.secondaryButtonText}>
+              {addingNote ? 'Agregando...' : 'Agregar observación'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Solución realizada</Text>
@@ -584,18 +675,6 @@ export default function TicketDetailScreen() {
           editable={!isReadOnly}
         />
       </View>
-
-      {!isReadOnly && (
-        <TouchableOpacity
-          style={styles.secondaryButton}
-          onPress={handleSaveProgress}
-          disabled={saving}
-        >
-          <Text style={styles.secondaryButtonText}>
-            {saving ? 'Guardando...' : 'Guardar progreso'}
-          </Text>
-        </TouchableOpacity>
-      )}
 
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
@@ -711,27 +790,76 @@ export default function TicketDetailScreen() {
       <Modal
         visible={showSignatureModal}
         animationType="slide"
-        onRequestClose={() => setShowSignatureModal(false)}
+        onRequestClose={handleCancelSignature}
       >
         <View style={styles.signatureContainer}>
-          <Text style={styles.signatureTitle}>Firma del cliente</Text>
-          <SignatureScreen
-            ref={signatureRef}
-            onOK={handleSignatureOK}
-            onEmpty={() => Alert.alert('Error', 'La firma está vacía')}
-            descriptionText="Firma dentro del recuadro"
-            clearText="Limpiar"
-            confirmText="Aceptar firma"
-            webStyle={`.m-signature-pad {box-shadow: none; border: 1px solid #e5e5e5;} .m-signature-pad--body {border: none;} .m-signature-pad--footer {display: none; margin: 0px;}`}
-          />
-          <TouchableOpacity
-            style={styles.cancelButton}
-            onPress={() => setShowSignatureModal(false)}
-          >
-            <Text style={styles.cancelButtonText}>Cancelar</Text>
-          </TouchableOpacity>
+          {/* Header */}
+          <View style={styles.signatureHeader}>
+            <Text style={styles.signatureTitle}>Firma del cliente</Text>
+            <TouchableOpacity
+              style={styles.signatureClearButton}
+              onPress={handleClearSignature}
+              disabled={!hasSignatureStrokes}
+            >
+              <Text
+                style={[
+                  styles.signatureClearButtonText,
+                  !hasSignatureStrokes && styles.signatureClearButtonTextDisabled,
+                ]}
+              >
+                Limpiar
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Canvas */}
+          <View style={styles.signatureCanvasContainer}>
+            <SignatureScreen
+              ref={signatureRef}
+              onOK={handleSignatureOK}
+              onEmpty={() => {
+                setHasSignatureStrokes(false);
+              }}
+              onBegin={handleSignatureBegin}
+              descriptionText="Firma dentro del recuadro"
+              webStyle={`.m-signature-pad {box-shadow: none; border: 1px solid #e5e7eb;} .m-signature-pad--body {border: none;} .m-signature-pad--footer {display: none; margin: 0px;}`}
+            />
+          </View>
+
+          {/* Footer with actions */}
+          <View style={styles.signatureFooter}>
+            <TouchableOpacity
+              style={styles.signatureCancelButton}
+              onPress={handleCancelSignature}
+              disabled={savingSignature}
+            >
+              <Text style={styles.signatureCancelButtonText}>Cancelar</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.signatureConfirmButton,
+                (!hasSignatureStrokes || savingSignature) && styles.signatureConfirmButtonDisabled,
+              ]}
+              onPress={handleConfirmSignature}
+              disabled={!hasSignatureStrokes || savingSignature}
+            >
+              {savingSignature ? (
+                <ActivityIndicator color="white" size="small" />
+              ) : (
+                <Text style={styles.signatureConfirmButtonText}>Usar esta firma</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </Modal>
+
+      {/* Activity Bottom Sheet */}
+      <ActivityBottomSheet
+        visible={showActivitySheet}
+        ticketId={ticketId}
+        onClose={() => setShowActivitySheet(false)}
+      />
     </ScrollView>
   );
 }
@@ -985,18 +1113,70 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'white',
   },
+  signatureHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
   signatureTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
-    padding: 16,
-    textAlign: 'center',
+    fontWeight: '600',
+    color: '#111827',
   },
-  cancelButton: {
-    padding: 16,
+  signatureClearButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  signatureClearButtonText: {
+    fontSize: 15,
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  signatureClearButtonTextDisabled: {
+    color: '#d1d5db',
+  },
+  signatureCanvasContainer: {
+    flex: 1,
+  },
+  signatureFooter: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    paddingBottom: 32,
+    gap: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
+    backgroundColor: 'white',
+  },
+  signatureCancelButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 8,
+    backgroundColor: '#f3f4f6',
     alignItems: 'center',
   },
-  cancelButtonText: {
-    color: '#DC2626',
+  signatureCancelButtonText: {
     fontSize: 16,
+    color: '#374151',
+    fontWeight: '600',
+  },
+  signatureConfirmButton: {
+    flex: 2,
+    paddingVertical: 14,
+    borderRadius: 8,
+    backgroundColor: '#007AFF',
+    alignItems: 'center',
+  },
+  signatureConfirmButtonDisabled: {
+    backgroundColor: '#d1d5db',
+  },
+  signatureConfirmButtonText: {
+    fontSize: 16,
+    color: 'white',
+    fontWeight: 'bold',
   },
 });

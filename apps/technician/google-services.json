@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "200213145398",
+    "project_id": "wisper-ticketing-dev",
+    "storage_bucket": "wisper-ticketing-dev.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:200213145398:android:f0ac915759ad763539b597",
+        "android_client_info": {
+          "package_name": "com.wisper.technician"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCs9ccUr9o0yrLPVsJCFqiFLloE0zAt41o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -21,6 +21,7 @@ import {
   formatTicketFolio,
   hasValidCoordinates,
 } from '@wisper/shared';
+import TicketActivityTimeline from '@/components/TicketActivity';
 
 interface TicketWithRelations extends Ticket {
   client: Client;
@@ -355,6 +356,9 @@ export default function TicketDetailPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Main Column */}
         <div className="lg:col-span-2 space-y-6">
+          {/* Bitácora del ticket */}
+          <TicketActivityTimeline ticketId={ticketId} />
+
           {/* Ticket Information */}
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
             <h2 className="text-lg font-semibold mb-4">Información del ticket</h2>
