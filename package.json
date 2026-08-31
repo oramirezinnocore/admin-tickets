@@ -22,6 +22,11 @@
     "test:storage": "node scripts/test-storage.mjs",
     "test:bootstrap": "node scripts/test-bootstrap-super-admin.mjs",
     "test:e2e": "npm run health-check && npm run test:sla && npm run test:rls && npm run test:storage",
+    "uat:preview": "node scripts/uat-reset-preview.mjs",
+    "uat:storage:preview": "node scripts/uat-reset-storage.mjs --dry-run",
+    "uat:reset": "node scripts/uat-reset.mjs",
+    "uat:storage:reset": "node scripts/uat-reset-storage.mjs --execute",
+    "uat:verify": "node scripts/uat-reset-verify.mjs",
     "eas-build-post-install": "npm run build --workspace=packages/shared"
   },
   "dependencies": {
