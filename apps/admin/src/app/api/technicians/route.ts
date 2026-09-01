@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Usuario no encontrado' }, { status: 403 });
     }
 
-    if (profile.role !== 'ADMIN') {
+    if (profile.role !== 'ADMIN' && profile.role !== 'SUPER_ADMIN') {
       return NextResponse.json({ error: 'No tienes permisos para crear técnicos' }, { status: 403 });
     }
 

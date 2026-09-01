@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
       .eq('id', user.id)
       .single();
 
-    if (!profile || profile.role !== 'ADMIN' || !profile.is_active) {
+    if (!profile || (profile.role !== 'ADMIN' && profile.role !== 'SUPER_ADMIN') || !profile.is_active) {
       return NextResponse.json({ error: 'Acceso denegado' }, { status: 403 });
     }
 
