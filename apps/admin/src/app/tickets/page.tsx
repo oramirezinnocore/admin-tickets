@@ -38,6 +38,7 @@ function TicketsPageContent() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [statusMultiFilter, setStatusMultiFilter] = useState<TicketStatus[]>([]);
   const [slaFilter, setSlaFilter] = useState<SlaFilter>('all');
   const [technicianFilter, setTechnicianFilter] = useState<string>('all');
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'month' | 'year'>('all');
@@ -60,34 +61,54 @@ function TicketsPageContent() {
 
   useEffect(() => {
     loadTickets();
+  }, []);
 
-    // Apply query params
+  useEffect(() => {
+    // Apply query params whenever they change
     const statusParam = searchParams.get('status');
     const slaParam = searchParams.get('sla');
     const filterParam = searchParams.get('filter');
     const periodParam = searchParams.get('period');
 
     if (statusParam) {
-      const statuses = statusParam.split(',');
+      const statuses = statusParam.split(',').map(s => s.trim()) as TicketStatus[];
       if (statuses.length === 1) {
         setStatusFilter(statuses[0] as StatusFilter);
+        setStatusMultiFilter([]);
+      } else {
+        setStatusFilter('all');
+        setStatusMultiFilter(statuses);
       }
+    } else {
+      setStatusFilter('all');
+      setStatusMultiFilter([]);
     }
 
     if (slaParam) {
-      setSlaFilter(slaParam as SlaFilter);
+      // Map lowercase query param to uppercase enum value
+      const slaMap: Record<string, TicketSlaState> = {
+        'green': TicketSlaState.GREEN,
+        'yellow': TicketSlaState.YELLOW,
+        'red': TicketSlaState.RED,
+        'overdue': TicketSlaState.OVERDUE,
+      };
+      setSlaFilter(slaMap[slaParam.toLowerCase()] || 'all');
+    } else {
+      setSlaFilter('all');
     }
 
     if (filterParam === 'today') {
       setDateFilter('today');
-    }
-
-    if (periodParam === 'month') {
+    } else if (periodParam === 'month') {
       setDateFilter('month');
     } else if (periodParam === 'year') {
       setDateFilter('year');
+    } else {
+      setDateFilter('all');
     }
+  }, [searchParams]);
 
+  useEffect(() => {
     // Auto refresh SLA every 60 seconds
     const interval = setInterval(() => {
       setRefreshCounter(c => c + 1);
@@ -98,7 +119,7 @@ function TicketsPageContent() {
 
   useEffect(() => {
     filterTickets();
-  }, [tickets, searchQuery, statusFilter, slaFilter, technicianFilter, dateFilter]);
+  }, [tickets, searchQuery, statusFilter, statusMultiFilter, slaFilter, technicianFilter, dateFilter]);
 
   async function loadTickets() {
     try {
@@ -127,13 +148,36 @@ function TicketsPageContent() {
   function filterTickets() {
     let filtered = tickets;
 
+    // Debug: log filter state (TEMPORARY - remove after validation)
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[Tickets Filter Debug]', {
+        totalTickets: tickets.length,
+        dateFilter,
+        statusFilter,
+        statusMultiFilter,
+        slaFilter,
+        searchParams: {
+          status: searchParams.get('status'),
+          sla: searchParams.get('sla'),
+          filter: searchParams.get('filter'),
+          period: searchParams.get('period'),
+        },
+      });
+    }
+
     // Date filter
     if (dateFilter === 'today') {
       const now = new Date();
       const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       filtered = filtered.filter(t => {
-        const createdAt = new Date(t.created_at);
-        return createdAt >= today;
+        // For resolved tickets, check closed_at; otherwise check created_at
+        if (t.status === 'RESOLVED' && t.closed_at) {
+          const closedAt = new Date(t.closed_at);
+          return closedAt >= today;
+        } else {
+          const createdAt = new Date(t.created_at);
+          return createdAt >= today;
+        }
       });
     } else if (dateFilter === 'month') {
       const now = new Date();
@@ -152,7 +196,9 @@ function TicketsPageContent() {
     }
 
     // Status filter
-    if (statusFilter !== 'all') {
+    if (statusMultiFilter.length > 0) {
+      filtered = filtered.filter(t => statusMultiFilter.includes(t.status));
+    } else if (statusFilter !== 'all') {
       filtered = filtered.filter(t => t.status === statusFilter);
     }
 
@@ -198,6 +244,19 @@ function TicketsPageContent() {
     });
 
     setFilteredTickets(filtered);
+
+    // Debug: log result count (TEMPORARY - remove after validation)
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[Tickets Filter Result]', {
+        filteredCount: filtered.length,
+        firstThree: filtered.slice(0, 3).map(t => ({
+          folio: t.folio,
+          status: t.status,
+          sla: getTicketSlaState(t.created_at),
+          created: t.created_at,
+        })),
+      });
+    }
   }
 
   function getSlaColor(slaState: TicketSlaState): string {
