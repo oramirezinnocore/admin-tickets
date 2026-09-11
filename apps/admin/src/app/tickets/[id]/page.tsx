@@ -23,7 +23,6 @@ import {
   hasValidCoordinates,
 } from '@wisper/shared';
 import TicketActivityTimeline from '@/components/TicketActivity';
-import { resolveTicketAdminAction } from './actions';
 
 interface TicketWithRelations extends Ticket {
   client: Client;
@@ -227,17 +226,38 @@ export default function TicketDetailPage() {
   async function handleResolve(reason: string) {
     if (!ticket) return;
 
-    const result = await resolveTicketAdminAction(ticket.id, reason);
+    try {
+      // Get session token
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        alert('Error: Sesión no válida');
+        return;
+      }
 
-    if (result.error) {
-      alert('Error: ' + result.error);
-      return;
+      // Call API route
+      const response = await fetch(`/api/tickets/${ticket.id}/resolve`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ reason }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        alert('Error: ' + (data.error || 'No se pudo resolver el ticket'));
+        return;
+      }
+
+      alert('Ticket resuelto exitosamente');
+      setIsResolveModalOpen(false);
+      await loadTicket();
+      await loadHistory();
+    } catch (error: any) {
+      alert('Error: ' + (error.message || 'Error al resolver el ticket'));
     }
-
-    alert('Ticket resuelto exitosamente');
-    setIsResolveModalOpen(false);
-    await loadTicket();
-    await loadHistory();
   }
 
   function getSlaColor(slaState: string): string {
