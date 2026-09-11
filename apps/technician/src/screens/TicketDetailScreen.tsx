@@ -553,7 +553,7 @@ export default function TicketDetailScreen() {
   const isCancelled = ticket?.status === 'CANCELLED';
   const isReadOnly = isResolved || isCancelled;
   const canStart = ticket?.status === 'ASSIGNED' || ticket?.status === 'PENDING';
-  const canPause = ticket?.status === 'IN_REVIEW';
+  const canPause = ticket?.status === 'IN_REVIEW' || ticket?.status === 'ASSIGNED';
   const canResume = ticket?.status === 'PAUSED';
   const canClose = ticket?.status === 'IN_REVIEW' || ticket?.status === 'PAUSED';
 
