@@ -148,23 +148,6 @@ function TicketsPageContent() {
   function filterTickets() {
     let filtered = tickets;
 
-    // Debug: log filter state (TEMPORARY - remove after validation)
-    if (process.env.NODE_ENV === 'development') {
-      console.log('[Tickets Filter Debug]', {
-        totalTickets: tickets.length,
-        dateFilter,
-        statusFilter,
-        statusMultiFilter,
-        slaFilter,
-        searchParams: {
-          status: searchParams.get('status'),
-          sla: searchParams.get('sla'),
-          filter: searchParams.get('filter'),
-          period: searchParams.get('period'),
-        },
-      });
-    }
-
     // Date filter
     if (dateFilter === 'today') {
       const now = new Date();
@@ -244,19 +227,6 @@ function TicketsPageContent() {
     });
 
     setFilteredTickets(filtered);
-
-    // Debug: log result count (TEMPORARY - remove after validation)
-    if (process.env.NODE_ENV === 'development') {
-      console.log('[Tickets Filter Result]', {
-        filteredCount: filtered.length,
-        firstThree: filtered.slice(0, 3).map(t => ({
-          folio: t.folio,
-          status: t.status,
-          sla: getTicketSlaState(t.created_at),
-          created: t.created_at,
-        })),
-      });
-    }
   }
 
   function getSlaColor(slaState: TicketSlaState): string {
