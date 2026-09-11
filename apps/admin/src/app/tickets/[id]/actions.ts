@@ -2,6 +2,7 @@
 
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { revalidatePath } from 'next/cache';
+import { cookies } from 'next/headers';
 
 export async function resolveTicketAdminAction(
   ticketId: string,
@@ -9,16 +10,39 @@ export async function resolveTicketAdminAction(
 ): Promise<{ success?: boolean; error?: string }> {
   const supabase = getSupabaseAdmin();
 
-  // 1. Verify auth
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // 1. Get authenticated user from session cookies
+  const cookieStore = await cookies();
+  const allCookies = cookieStore.getAll();
 
-  if (!user) {
+  // Find Supabase auth token in cookies
+  const authCookie = allCookies.find(
+    cookie => cookie.name.startsWith('sb-') && cookie.name.includes('auth-token')
+  );
+
+  if (!authCookie) {
     return { error: 'No autorizado' };
   }
 
-  // 2. Verify admin role
+  let sessionData;
+  try {
+    sessionData = JSON.parse(authCookie.value);
+  } catch {
+    return { error: 'No autorizado' };
+  }
+
+  const accessToken = sessionData?.access_token;
+  if (!accessToken) {
+    return { error: 'No autorizado' };
+  }
+
+  // 2. Validate the token and get user
+  const { data: { user }, error: userError } = await supabase.auth.getUser(accessToken);
+
+  if (userError || !user) {
+    return { error: 'No autorizado' };
+  }
+
+  // 3. Verify admin role
   const { data: profile } = await supabase
     .from('profiles')
     .select('role')
