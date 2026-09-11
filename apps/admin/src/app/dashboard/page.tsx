@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import ProtectedLayout from '@/components/ProtectedLayout';
 import { supabase } from '@/lib/supabase';
 import {
@@ -300,38 +301,54 @@ export default function DashboardPage() {
 
       {/* Main KPIs */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <StatCard label="Tickets hoy" value={stats.createdToday} sublabel="Reportados" />
-        <StatCard label="Resueltos hoy" value={stats.resolvedToday} sublabel="Cerrados" color="green" />
-        <StatCard label="Activos" value={stats.pending} sublabel="En proceso" color="blue" />
-        <StatCard label="Vencidos" value={stats.overdue} sublabel="Urgentes" color="red" />
+        <Link href="/tickets?filter=today" className="block hover:scale-105 transition-transform">
+          <StatCard label="Tickets hoy" value={stats.createdToday} sublabel="Reportados" />
+        </Link>
+        <Link href="/tickets?status=RESOLVED&filter=today" className="block hover:scale-105 transition-transform">
+          <StatCard label="Resueltos hoy" value={stats.resolvedToday} sublabel="Cerrados" color="green" />
+        </Link>
+        <Link href="/tickets?status=PENDING,ASSIGNED,IN_REVIEW,PAUSED" className="block hover:scale-105 transition-transform">
+          <StatCard label="Activos" value={stats.pending} sublabel="En proceso" color="blue" />
+        </Link>
+        <Link href="/tickets?sla=overdue" className="block hover:scale-105 transition-transform">
+          <StatCard label="Vencidos" value={stats.overdue} sublabel="Urgentes" color="red" />
+        </Link>
       </div>
 
       {/* SLA cards */}
       <div className="mb-8">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Estado SLA - Tickets activos</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <SlaCard label="Verdes" sublabel="0-24 horas" value={stats.green} color="green" />
-          <SlaCard label="Amarillos" sublabel="24-48 horas" value={stats.yellow} color="yellow" />
-          <SlaCard label="Rojos" sublabel="48-72 horas" value={stats.red} color="red" />
-          <SlaCard label="Vencidos" sublabel="+72 horas" value={stats.overdue} color="overdue" />
+          <Link href="/tickets?sla=green" className="block hover:scale-105 transition-transform">
+            <SlaCard label="Verdes" sublabel="0-24 horas" value={stats.green} color="green" />
+          </Link>
+          <Link href="/tickets?sla=yellow" className="block hover:scale-105 transition-transform">
+            <SlaCard label="Amarillos" sublabel="24-48 horas" value={stats.yellow} color="yellow" />
+          </Link>
+          <Link href="/tickets?sla=red" className="block hover:scale-105 transition-transform">
+            <SlaCard label="Rojos" sublabel="48-72 horas" value={stats.red} color="red" />
+          </Link>
+          <Link href="/tickets?sla=overdue" className="block hover:scale-105 transition-transform">
+            <SlaCard label="Vencidos" sublabel="+72 horas" value={stats.overdue} color="overdue" />
+          </Link>
         </div>
       </div>
 
       {/* Secondary metrics */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <div className="card">
+        <Link href="/tickets?status=RESOLVED&period=month" className="card hover:shadow-lg transition-shadow cursor-pointer">
           <div className="card-body">
             <h3 className="text-sm font-medium text-gray-500 mb-3">Resueltos este mes</h3>
             <p className="text-3xl font-bold text-green-600">{stats.resolvedMonth}</p>
           </div>
-        </div>
-        <div className="card">
+        </Link>
+        <Link href="/tickets?status=RESOLVED&period=year" className="card hover:shadow-lg transition-shadow cursor-pointer">
           <div className="card-body">
             <h3 className="text-sm font-medium text-gray-500 mb-3">Resueltos este año</h3>
             <p className="text-3xl font-bold text-green-600">{stats.resolvedYear}</p>
           </div>
-        </div>
-        <div className="card">
+        </Link>
+        <Link href="/technicians" className="card hover:shadow-lg transition-shadow cursor-pointer">
           <div className="card-body">
             <h3 className="text-sm font-medium text-gray-500 mb-3">Técnicos</h3>
             <div className="space-y-1.5 text-sm">
@@ -340,7 +357,7 @@ export default function DashboardPage() {
               <p><span className="font-semibold text-gray-900">{stats.inReview}</span> <span className="text-gray-600">en revisión</span></p>
             </div>
           </div>
-        </div>
+        </Link>
       </div>
 
       {/* Lists */}

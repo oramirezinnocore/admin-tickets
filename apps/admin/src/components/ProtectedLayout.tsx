@@ -104,11 +104,13 @@ function Header() {
         {/* Top bar */}
         <div className="flex justify-between items-center py-4">
           <div className="flex items-center gap-3">
-            <img
-              src="/branding/wisper-logo.png"
-              alt="Wisper Logística"
-              className="h-8 w-auto"
-            />
+            <Link href="/dashboard" className="hover:opacity-80 transition-opacity" title="Ir al inicio">
+              <img
+                src="/branding/wisper-logo.png"
+                alt="Wisper Logística"
+                className="h-8 w-auto cursor-pointer"
+              />
+            </Link>
             <div className="border-l border-gray-300 pl-3">
               <p className="text-xs text-gray-600 font-medium">Panel administrativo</p>
             </div>

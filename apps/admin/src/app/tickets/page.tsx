@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import ProtectedLayout from '@/components/ProtectedLayout';
 import Modal from '@/components/ui/Modal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
@@ -32,6 +32,7 @@ type SlaFilter = 'all' | TicketSlaState;
 
 export default function TicketsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [tickets, setTickets] = useState<TicketWithRelations[]>([]);
   const [filteredTickets, setFilteredTickets] = useState<TicketWithRelations[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,6 +40,7 @@ export default function TicketsPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [slaFilter, setSlaFilter] = useState<SlaFilter>('all');
   const [technicianFilter, setTechnicianFilter] = useState<string>('all');
+  const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'month' | 'year'>('all');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [error, setError] = useState('');
   const [, setRefreshCounter] = useState(0);
@@ -59,6 +61,33 @@ export default function TicketsPage() {
   useEffect(() => {
     loadTickets();
 
+    // Apply query params
+    const statusParam = searchParams.get('status');
+    const slaParam = searchParams.get('sla');
+    const filterParam = searchParams.get('filter');
+    const periodParam = searchParams.get('period');
+
+    if (statusParam) {
+      const statuses = statusParam.split(',');
+      if (statuses.length === 1) {
+        setStatusFilter(statuses[0] as StatusFilter);
+      }
+    }
+
+    if (slaParam) {
+      setSlaFilter(slaParam as SlaFilter);
+    }
+
+    if (filterParam === 'today') {
+      setDateFilter('today');
+    }
+
+    if (periodParam === 'month') {
+      setDateFilter('month');
+    } else if (periodParam === 'year') {
+      setDateFilter('year');
+    }
+
     // Auto refresh SLA every 60 seconds
     const interval = setInterval(() => {
       setRefreshCounter(c => c + 1);
@@ -69,7 +98,7 @@ export default function TicketsPage() {
 
   useEffect(() => {
     filterTickets();
-  }, [tickets, searchQuery, statusFilter, slaFilter, technicianFilter]);
+  }, [tickets, searchQuery, statusFilter, slaFilter, technicianFilter, dateFilter]);
 
   async function loadTickets() {
     try {
@@ -97,6 +126,30 @@ export default function TicketsPage() {
 
   function filterTickets() {
     let filtered = tickets;
+
+    // Date filter
+    if (dateFilter === 'today') {
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      filtered = filtered.filter(t => {
+        const createdAt = new Date(t.created_at);
+        return createdAt >= today;
+      });
+    } else if (dateFilter === 'month') {
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      filtered = filtered.filter(t => {
+        const closedAt = t.closed_at ? new Date(t.closed_at) : null;
+        return closedAt && closedAt >= monthStart;
+      });
+    } else if (dateFilter === 'year') {
+      const now = new Date();
+      const yearStart = new Date(now.getFullYear(), 0, 1);
+      filtered = filtered.filter(t => {
+        const closedAt = t.closed_at ? new Date(t.closed_at) : null;
+        return closedAt && closedAt >= yearStart;
+      });
+    }
 
     // Status filter
     if (statusFilter !== 'all') {

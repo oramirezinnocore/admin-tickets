@@ -7,6 +7,7 @@ import Modal from '@/components/ui/Modal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import Combobox from '@/components/ui/Combobox';
 import ClientMapPreview from '@/components/ClientMapPreview';
+import ResolveTicketModal from '@/components/ResolveTicketModal';
 import type { ComboboxOption } from '@/components/ui/Combobox';
 import { supabase } from '@/lib/supabase';
 import {
@@ -22,6 +23,7 @@ import {
   hasValidCoordinates,
 } from '@wisper/shared';
 import TicketActivityTimeline from '@/components/TicketActivity';
+import { resolveTicketAdminAction } from './actions';
 
 interface TicketWithRelations extends Ticket {
   client: Client;
@@ -100,6 +102,7 @@ export default function TicketDetailPage() {
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
   const [isUnassignDialogOpen, setIsUnassignDialogOpen] = useState(false);
+  const [isResolveModalOpen, setIsResolveModalOpen] = useState(false);
   const [, setRefreshCounter] = useState(0);
 
   useEffect(() => {
@@ -214,6 +217,27 @@ export default function TicketDetailPage() {
   function canCancel(): boolean {
     if (!ticket) return false;
     return ticket.status !== 'RESOLVED' && ticket.status !== 'CANCELLED';
+  }
+
+  function canResolve(): boolean {
+    if (!ticket) return false;
+    return ticket.status !== 'RESOLVED' && ticket.status !== 'CANCELLED';
+  }
+
+  async function handleResolve(reason: string) {
+    if (!ticket) return;
+
+    const result = await resolveTicketAdminAction(ticket.id, reason);
+
+    if (result.error) {
+      alert('Error: ' + result.error);
+      return;
+    }
+
+    alert('Ticket resuelto exitosamente');
+    setIsResolveModalOpen(false);
+    await loadTicket();
+    await loadHistory();
   }
 
   function getSlaColor(slaState: string): string {
@@ -338,6 +362,14 @@ export default function TicketDetailPage() {
                 className="px-4 py-2 bg-gray-200 text-gray-700 text-sm font-medium hover:bg-gray-300 rounded-md transition"
               >
                 Desasignar
+              </button>
+            )}
+            {canResolve() && (
+              <button
+                onClick={() => setIsResolveModalOpen(true)}
+                className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 transition"
+              >
+                Resolver
               </button>
             )}
             {canCancel() && (
@@ -649,6 +681,13 @@ export default function TicketDetailPage() {
         message={`¿Quitar la asignación del ticket ${formatTicketFolio(ticket.folio)}? El ticket volverá a estado PENDIENTE.`}
         confirmText="Desasignar"
         isDestructive
+      />
+
+      <ResolveTicketModal
+        isOpen={isResolveModalOpen}
+        onClose={() => setIsResolveModalOpen(false)}
+        onConfirm={handleResolve}
+        ticketFolio={formatTicketFolio(ticket.folio)}
       />
     </ProtectedLayout>
   );
