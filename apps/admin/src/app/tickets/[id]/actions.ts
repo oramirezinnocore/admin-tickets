@@ -1,13 +1,13 @@
 'use server';
 
-import { createClient } from '@/lib/supabase/server';
+import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { revalidatePath } from 'next/cache';
 
 export async function resolveTicketAdminAction(
   ticketId: string,
   reason: string
 ): Promise<{ success?: boolean; error?: string }> {
-  const supabase = await createClient();
+  const supabase = getSupabaseAdmin();
 
   // 1. Verify auth
   const {

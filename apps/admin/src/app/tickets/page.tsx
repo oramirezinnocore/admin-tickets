@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import ProtectedLayout from '@/components/ProtectedLayout';
 import Modal from '@/components/ui/Modal';
@@ -30,7 +30,7 @@ interface TicketWithRelations extends Ticket {
 type StatusFilter = 'all' | TicketStatus;
 type SlaFilter = 'all' | TicketSlaState;
 
-export default function TicketsPage() {
+function TicketsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [tickets, setTickets] = useState<TicketWithRelations[]>([]);
@@ -622,5 +622,19 @@ function CreateTicketModal({ isOpen, onClose, onSuccess }: CreateTicketModalProp
         </div>
       </form>
     </Modal>
+  );
+}
+
+export default function TicketsPage() {
+  return (
+    <Suspense fallback={
+      <ProtectedLayout>
+        <div className="flex items-center justify-center py-12">
+          <div className="text-gray-600">Cargando tickets...</div>
+        </div>
+      </ProtectedLayout>
+    }>
+      <TicketsPageContent />
+    </Suspense>
   );
 }
