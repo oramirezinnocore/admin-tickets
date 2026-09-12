@@ -41,7 +41,7 @@ function TicketsPageContent() {
   const [statusMultiFilter, setStatusMultiFilter] = useState<TicketStatus[]>([]);
   const [slaFilter, setSlaFilter] = useState<SlaFilter>('all');
   const [technicianFilter, setTechnicianFilter] = useState<string>('all');
-  const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'month' | 'year'>('all');
+  const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'resolved-today' | 'month' | 'year'>('all');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [error, setError] = useState('');
   const [, setRefreshCounter] = useState(0);
@@ -99,6 +99,8 @@ function TicketsPageContent() {
 
     if (filterParam === 'today') {
       setDateFilter('today');
+    } else if (periodParam === 'today') {
+      setDateFilter('resolved-today');
     } else if (periodParam === 'month') {
       setDateFilter('month');
     } else if (periodParam === 'year') {
@@ -152,15 +154,18 @@ function TicketsPageContent() {
     if (dateFilter === 'today') {
       const now = new Date();
       const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      // "Tickets de hoy" = tickets CREADOS hoy, regardless of status
       filtered = filtered.filter(t => {
-        // For resolved tickets, check closed_at; otherwise check created_at
-        if (t.status === 'RESOLVED' && t.closed_at) {
-          const closedAt = new Date(t.closed_at);
-          return closedAt >= today;
-        } else {
-          const createdAt = new Date(t.created_at);
-          return createdAt >= today;
-        }
+        const createdAt = new Date(t.created_at);
+        return createdAt >= today;
+      });
+    } else if (dateFilter === 'resolved-today') {
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      // "Resueltos hoy" = tickets CERRADOS hoy (for resolved tickets only)
+      filtered = filtered.filter(t => {
+        const closedAt = t.closed_at ? new Date(t.closed_at) : null;
+        return closedAt && closedAt >= today;
       });
     } else if (dateFilter === 'month') {
       const now = new Date();
