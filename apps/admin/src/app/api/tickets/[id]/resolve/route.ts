@@ -42,13 +42,69 @@ export async function POST(
     }
 
     // Get request body
-    const { reason } = await request.json();
+    const { reason, evidenceDataUrl, evidenceFilename, evidenceMimeType } = await request.json();
 
     if (!reason?.trim()) {
       return NextResponse.json({ error: 'El motivo es obligatorio' }, { status: 400 });
     }
 
     const { id: ticketId } = await params;
+
+    // Upload evidence if provided
+    let evidenceId: string | null = null;
+
+    if (evidenceDataUrl && evidenceFilename && evidenceMimeType) {
+      try {
+        // Convert data URL to blob
+        const base64Data = evidenceDataUrl.split(',')[1];
+        const binaryData = Buffer.from(base64Data, 'base64');
+
+        // Generate file path
+        const timestamp = Date.now();
+        const random = Math.random().toString(36).substring(7);
+        const extension = evidenceFilename.split('.').pop() || 'jpg';
+        const filePath = `${ticketId}/${timestamp}-${random}.${extension}`;
+
+        // Upload to Storage
+        const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
+          .from('ticket-evidences')
+          .upload(filePath, binaryData, {
+            contentType: evidenceMimeType,
+            upsert: false,
+          });
+
+        if (uploadError) {
+          console.error('[API] Storage upload error:', uploadError);
+          return NextResponse.json({ error: 'Error al subir evidencia' }, { status: 500 });
+        }
+
+        const storagePath = uploadData?.path || filePath;
+
+        // Create ticket_evidences record
+        const { data: evidenceData, error: evidenceDbError } = await supabaseAdmin
+          .from('ticket_evidences')
+          .insert({
+            ticket_id: ticketId,
+            type: 'SOLUTION',
+            file_url: storagePath,
+            created_by: user.id,
+          })
+          .select('id')
+          .single();
+
+        if (evidenceDbError) {
+          console.error('[API] Evidence DB error:', evidenceDbError);
+          // Rollback storage upload
+          await supabaseAdmin.storage.from('ticket-evidences').remove([storagePath]);
+          return NextResponse.json({ error: 'Error al guardar evidencia' }, { status: 500 });
+        }
+
+        evidenceId = evidenceData.id;
+      } catch (evidenceError: any) {
+        console.error('[API] Evidence processing error:', evidenceError);
+        return NextResponse.json({ error: 'Error al procesar evidencia' }, { status: 500 });
+      }
+    }
 
     // Update ticket to RESOLVED
     const { error: ticketError } = await supabaseAdmin
@@ -66,14 +122,22 @@ export async function POST(
     }
 
     // Create activity log entry
-    const { error: activityError } = await supabaseAdmin.from('ticket_activity').insert({
+    const activityData: any = {
       ticket_id: ticketId,
       activity_type: 'ADMIN_RESOLVED',
       actor_profile_id: user.id,
       note: reason.trim(),
       new_status: 'RESOLVED',
       created_at: new Date().toISOString(),
-    });
+    };
+
+    if (evidenceId) {
+      activityData.evidence_id = evidenceId;
+    }
+
+    const { error: activityError } = await supabaseAdmin
+      .from('ticket_activity')
+      .insert(activityData);
 
     if (activityError) {
       console.error('[API] Activity log error:', activityError);

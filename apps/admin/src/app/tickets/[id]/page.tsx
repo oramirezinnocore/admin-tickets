@@ -223,15 +223,31 @@ export default function TicketDetailPage() {
     return ticket.status !== 'RESOLVED' && ticket.status !== 'CANCELLED';
   }
 
-  async function handleResolve(reason: string) {
+  async function handleResolve(reason: string, evidenceFile?: File) {
     if (!ticket) return;
 
     try {
       // Get session token
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        alert('Error: Sesión no válida');
-        return;
+        throw new Error('Sesión no válida');
+      }
+
+      // Prepare request body
+      const body: any = { reason };
+
+      // Convert evidence file to data URL if provided
+      if (evidenceFile) {
+        const reader = new FileReader();
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(evidenceFile);
+        });
+
+        body.evidenceDataUrl = dataUrl;
+        body.evidenceFilename = evidenceFile.name;
+        body.evidenceMimeType = evidenceFile.type;
       }
 
       // Call API route
@@ -241,22 +257,22 @@ export default function TicketDetailPage() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ reason }),
+        body: JSON.stringify(body),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        alert('Error: ' + (data.error || 'No se pudo resolver el ticket'));
-        return;
+        throw new Error(data.error || 'No se pudo resolver el ticket');
       }
 
-      alert('Ticket resuelto exitosamente');
+      // Success - modal will handle UI feedback
       setIsResolveModalOpen(false);
       await loadTicket();
       await loadHistory();
     } catch (error: any) {
-      alert('Error: ' + (error.message || 'Error al resolver el ticket'));
+      // Re-throw to let modal handle error display
+      throw error;
     }
   }
 
