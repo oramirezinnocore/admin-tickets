@@ -2,7 +2,6 @@
 
 import { useState, useRef, useEffect } from 'react';
 import Modal from '@/components/ui/Modal';
-import ConfirmDialog from '@/components/ui/ConfirmDialog';
 
 interface ResolveTicketModalProps {
   isOpen: boolean;
@@ -24,7 +23,6 @@ export default function ResolveTicketModal({
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -77,7 +75,7 @@ export default function ResolveTicketModal({
     setError('');
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
     if (!reason.trim()) {
@@ -85,12 +83,9 @@ export default function ResolveTicketModal({
       return;
     }
 
-    setError('');
-    setShowConfirm(true);
-  }
+    // Prevent double submission
+    if (loading) return;
 
-  async function handleConfirmResolve() {
-    setShowConfirm(false);
     setLoading(true);
     setError('');
 
@@ -114,7 +109,6 @@ export default function ResolveTicketModal({
       handleRemoveFile();
       setError('');
       setSuccess(false);
-      setShowConfirm(false);
       onClose();
     }
   }
@@ -242,16 +236,6 @@ export default function ResolveTicketModal({
           </div>
         </Modal>
       )}
-
-      {/* Confirmation dialog */}
-      <ConfirmDialog
-        isOpen={showConfirm}
-        onClose={() => setShowConfirm(false)}
-        onConfirm={handleConfirmResolve}
-        title="Confirmar resolución"
-        message={`¿Deseas marcar el ticket ${ticketFolio} como resuelto? Esta acción quedará registrada en la bitácora.`}
-        confirmText="Sí, resolver ticket"
-      />
     </>
   );
 }
