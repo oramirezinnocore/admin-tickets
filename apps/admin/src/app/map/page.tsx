@@ -127,6 +127,7 @@ export default function MapPage() {
   const [selectedTech, setSelectedTech] = useState<string | null>(null);
   const [tab, setTab] = useState<'locations' | 'route'>('locations');
   const [officeCoords, setOfficeCoords] = useState<[number, number] | null>(null);
+  const [mapReady, setMapReady] = useState(false);
 
   // Route optimization state
   const [routeTechId, setRouteTechId] = useState<string>('');
@@ -137,6 +138,7 @@ export default function MapPage() {
 
   const markersRef = useRef<Map<string, any>>(new Map());
   const routeMarkersRef = useRef<any[]>([]);
+  const officeMarkerRef = useRef<any>(null);
   const routeSourceId = 'route-line';
   const routeLayerId = 'route-line-layer';
 
@@ -279,6 +281,7 @@ export default function MapPage() {
         console.log('[MAP41][LOAD]', { time: performance.now() });
         if (node.isConnected) {
           setMapLoading(false);
+          setMapReady(true);
           map.resize();
         }
       });
@@ -396,21 +399,94 @@ export default function MapPage() {
     };
   }, []);
 
-  // Center map on office when coords load (if no selection)
+  // Center map on office when coords load AND map is ready (if no selection)
   useEffect(() => {
-    if (!mapRef.current || !officeCoords) return;
+    console.log('[MAP OFFICE DEBUG]', {
+      mapReady,
+      hasMapRef: !!mapRef.current,
+      officeCoords,
+      selectedTech,
+      routeTechId,
+    });
+
+    if (!mapReady || !mapRef.current || !officeCoords) {
+      console.log('[MAP OFFICE] Skipping - not ready');
+      return;
+    }
 
     // Don't override if user has selected a technician or is viewing a route
-    if (selectedTech || routeTechId) return;
+    if (selectedTech || routeTechId) {
+      console.log('[MAP OFFICE] Skipping - selection active');
+      return;
+    }
 
     console.log('[MAP OFFICE] Centering on office:', officeCoords);
 
     mapRef.current.flyTo({
       center: officeCoords,
-      zoom: 12,
+      zoom: 13,
       essential: true,
     });
-  }, [officeCoords, selectedTech, routeTechId]);
+  }, [mapReady, officeCoords, selectedTech, routeTechId]);
+
+  // Add office marker when coords are available
+  useEffect(() => {
+    const addOfficeMarker = async () => {
+      if (!mapReady || !mapRef.current || !officeCoords) {
+        // Remove marker if no coords
+        if (officeMarkerRef.current) {
+          officeMarkerRef.current.remove();
+          officeMarkerRef.current = null;
+        }
+        return;
+      }
+
+      const maplibregl = await initMapLibre();
+
+      // Remove old marker if exists
+      if (officeMarkerRef.current) {
+        officeMarkerRef.current.remove();
+      }
+
+      // Create office marker element
+      const el = document.createElement('div');
+      el.className = 'office-marker';
+      el.style.backgroundColor = '#3B82F6';
+      el.style.width = '32px';
+      el.style.height = '32px';
+      el.style.borderRadius = '50%';
+      el.style.border = '3px solid white';
+      el.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
+      el.style.cursor = 'pointer';
+      el.style.display = 'flex';
+      el.style.alignItems = 'center';
+      el.style.justifyContent = 'center';
+      el.style.fontSize = '16px';
+      el.innerHTML = '🏢';
+
+      // Create marker
+      const marker = new (maplibregl as any).Marker({ element: el })
+        .setLngLat(officeCoords)
+        .addTo(mapRef.current);
+
+      // Add popup
+      const popup = new (maplibregl as any).Popup({ offset: 25 }).setHTML(`
+        <div style="padding: 12px; min-width: 200px;">
+          <div style="font-weight: 700; font-size: 15px; margin-bottom: 8px; color: #111827;">
+            Oficina central
+          </div>
+          <div style="font-size: 13px; color: #374151; line-height: 1.4;">
+            ${officeCoords[1].toFixed(6)}, ${officeCoords[0].toFixed(6)}
+          </div>
+        </div>
+      `);
+
+      marker.setPopup(popup);
+      officeMarkerRef.current = marker;
+    };
+
+    addOfficeMarker();
+  }, [mapReady, officeCoords]);
 
   useEffect(() => {
     if (mapRef.current && tab === 'locations') {
@@ -431,11 +507,36 @@ export default function MapPage() {
     try {
       const { data } = await supabase
         .from('organization_settings')
-        .select('office_latitude, office_longitude')
+        .select('office_address, office_latitude, office_longitude')
         .single();
 
+      console.log('[OFFICE SETTINGS RAW]', data);
+
       if (data?.office_latitude && data?.office_longitude) {
-        setOfficeCoords([data.office_longitude, data.office_latitude]);
+        // Convert to numbers explicitly (Supabase may return DECIMAL as string)
+        const lat = Number(data.office_latitude);
+        const lng = Number(data.office_longitude);
+
+        console.log('[OFFICE COORDS PARSED]', { lat, lng });
+
+        // Validate coordinates
+        if (
+          Number.isFinite(lat) &&
+          Number.isFinite(lng) &&
+          lat >= -90 &&
+          lat <= 90 &&
+          lng >= -180 &&
+          lng <= 180
+        ) {
+          // MapLibre expects [longitude, latitude]
+          const coords: [number, number] = [lng, lat];
+          console.log('[OFFICE COORDS SET]', coords);
+          setOfficeCoords(coords);
+        } else {
+          console.error('[OFFICE COORDS INVALID]', { lat, lng });
+        }
+      } else {
+        console.log('[OFFICE COORDS] No office configured');
       }
     } catch (err: any) {
       // Silently fail - use fallback center
