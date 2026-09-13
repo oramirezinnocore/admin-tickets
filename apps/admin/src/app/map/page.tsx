@@ -396,6 +396,22 @@ export default function MapPage() {
     };
   }, []);
 
+  // Center map on office when coords load (if no selection)
+  useEffect(() => {
+    if (!mapRef.current || !officeCoords) return;
+
+    // Don't override if user has selected a technician or is viewing a route
+    if (selectedTech || routeTechId) return;
+
+    console.log('[MAP OFFICE] Centering on office:', officeCoords);
+
+    mapRef.current.flyTo({
+      center: officeCoords,
+      zoom: 12,
+      essential: true,
+    });
+  }, [officeCoords, selectedTech, routeTechId]);
+
   useEffect(() => {
     if (mapRef.current && tab === 'locations') {
       updateMarkers();
