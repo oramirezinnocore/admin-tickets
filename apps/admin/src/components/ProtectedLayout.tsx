@@ -96,6 +96,7 @@ function Header() {
   // Add Administrators link only for SUPER_ADMIN
   if (profile && canManageAdministrators(profile.role)) {
     navLinks.push({ href: '/administrators', label: 'Administradores' });
+    navLinks.push({ href: '/settings/office', label: 'Configuración' });
   }
 
   return (
