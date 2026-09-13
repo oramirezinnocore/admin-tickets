@@ -126,6 +126,7 @@ export default function MapPage() {
   const [mapError, setMapError] = useState('');
   const [selectedTech, setSelectedTech] = useState<string | null>(null);
   const [tab, setTab] = useState<'locations' | 'route'>('locations');
+  const [officeCoords, setOfficeCoords] = useState<[number, number] | null>(null);
 
   // Route optimization state
   const [routeTechId, setRouteTechId] = useState<string>('');
@@ -148,6 +149,7 @@ export default function MapPage() {
   const generationRef = useRef(0);
 
   useEffect(() => {
+    loadOfficeSettings();
     loadTechnicians();
 
     // Auto-refresh every 30 seconds
@@ -240,10 +242,13 @@ export default function MapPage() {
         return;
       }
 
+      // Use office coordinates if available, otherwise fallback to MORELIA_CENTER
+      const mapCenter = officeCoords || MORELIA_CENTER;
+
       const map = new (maplibregl as any).Map({
         container: node,
         style: DEFAULT_MAP_STYLE,
-        center: MORELIA_CENTER,
+        center: mapCenter,
         zoom: 12,
       });
 
@@ -405,6 +410,22 @@ export default function MapPage() {
       setSelectedTicketIds(new Set());
     }
   }, [routeTechId]);
+
+  async function loadOfficeSettings() {
+    try {
+      const { data } = await supabase
+        .from('organization_settings')
+        .select('office_latitude, office_longitude')
+        .single();
+
+      if (data?.office_latitude && data?.office_longitude) {
+        setOfficeCoords([data.office_longitude, data.office_latitude]);
+      }
+    } catch (err: any) {
+      // Silently fail - use fallback center
+      console.log('[Map] Office settings not available, using fallback center');
+    }
+  }
 
   async function loadTechnicians() {
     try {
