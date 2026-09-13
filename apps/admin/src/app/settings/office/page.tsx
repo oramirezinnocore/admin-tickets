@@ -19,6 +19,10 @@ export default function OfficeSettingsPage() {
   const [officeLongitude, setOfficeLongitude] = useState<number | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
 
+  // Feedback messages
+  const [successMessage, setSuccessMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+
   useEffect(() => {
     // Check authorization
     if (profile && profile.role !== 'SUPER_ADMIN') {
@@ -68,8 +72,12 @@ export default function OfficeSettingsPage() {
   }
 
   async function handleSave() {
+    // Clear previous messages
+    setSuccessMessage('');
+    setErrorMessage('');
+
     if (!officeLatitude || !officeLongitude) {
-      alert('Selecciona una ubicación en el mapa antes de guardar');
+      setErrorMessage('Selecciona una ubicación en el mapa antes de guardar');
       return;
     }
 
@@ -90,10 +98,15 @@ export default function OfficeSettingsPage() {
       }
 
       setHasChanges(false);
-      alert('✓ Ubicación de oficina guardada correctamente');
+      setSuccessMessage('Ubicación de oficina guardada correctamente');
+
+      // Auto-dismiss success message after 3 seconds
+      setTimeout(() => {
+        setSuccessMessage('');
+      }, 3000);
     } catch (err: any) {
       console.error('[OfficeSettings] Save error:', err);
-      alert('Error al guardar: ' + err.message);
+      setErrorMessage(err.message || 'No fue posible guardar la ubicación de oficina');
     } finally {
       setSaving(false);
     }
@@ -130,6 +143,35 @@ export default function OfficeSettingsPage() {
             Define la ubicación de tu oficina central para usarla como punto de referencia en el mapa operativo.
           </p>
         </div>
+
+        {/* Success message */}
+        {successMessage && (
+          <div className="mb-6 bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3">
+            <div className="flex-shrink-0 text-green-600 text-xl">✓</div>
+            <div className="flex-1">
+              <p className="text-sm font-medium text-green-800">{successMessage}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Error message */}
+        {errorMessage && (
+          <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+            <div className="flex-shrink-0 text-red-600 text-xl">⚠</div>
+            <div className="flex-1">
+              <p className="text-sm font-medium text-red-800">{errorMessage}</p>
+            </div>
+            <button
+              onClick={() => setErrorMessage('')}
+              className="flex-shrink-0 text-red-400 hover:text-red-600 transition"
+              aria-label="Cerrar"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        )}
 
         {/* Form */}
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
