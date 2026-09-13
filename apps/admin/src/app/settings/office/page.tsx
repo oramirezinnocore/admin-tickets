@@ -55,9 +55,10 @@ export default function OfficeSettingsPage() {
     }
   }
 
-  function handleLocationSelect(latitude: number, longitude: number) {
+  function handleLocationSelect(latitude: number, longitude: number, address: string) {
     setOfficeLatitude(latitude);
     setOfficeLongitude(longitude);
+    setOfficeAddress(address);
     setHasChanges(true);
     setShowMap(false);
   }
@@ -126,54 +127,30 @@ export default function OfficeSettingsPage() {
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Configuración de oficina</h1>
           <p className="text-sm text-gray-600">
-            Define la ubicación de tu oficina central para usarla como punto de referencia en el mapa de técnicos.
+            Define la ubicación de tu oficina central para usarla como punto de referencia en el mapa operativo.
           </p>
         </div>
 
         {/* Form */}
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
           <div className="p-6 space-y-6">
-            {/* Address field (optional display) */}
-            <div>
-              <label htmlFor="address" className="block text-sm font-medium text-gray-700 mb-2">
-                Dirección de oficina (referencia)
-              </label>
-              <input
-                id="address"
-                type="text"
-                value={officeAddress}
-                onChange={(e) => {
-                  setOfficeAddress(e.target.value);
-                  setHasChanges(true);
-                }}
-                placeholder="Ej. Av. Madero 123, Centro, Morelia"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-              <p className="mt-1 text-xs text-gray-500">
-                Esto es solo una referencia descriptiva. Usa el botón de abajo para seleccionar la ubicación exacta.
-              </p>
-            </div>
-
             {/* Location picker */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Ubicación en mapa
+                Ubicación de oficina
               </label>
 
               {officeLatitude && officeLongitude ? (
                 <div className="border border-gray-200 rounded-md p-4 bg-gray-50">
                   <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <div className="text-sm font-medium text-gray-900 mb-1">
-                        ✓ Ubicación configurada
-                      </div>
-                      <div className="font-mono text-xs text-gray-600">
-                        {officeLatitude.toFixed(6)}, {officeLongitude.toFixed(6)}
+                    <div className="flex-1">
+                      <div className="text-sm font-medium text-gray-900 mb-2">
+                        {officeAddress || 'Ubicación configurada'}
                       </div>
                     </div>
                     <button
                       onClick={handleClear}
-                      className="text-sm text-red-600 hover:text-red-700 font-medium"
+                      className="text-sm text-red-600 hover:text-red-700 font-medium ml-4"
                     >
                       Limpiar
                     </button>
@@ -188,13 +165,13 @@ export default function OfficeSettingsPage() {
               ) : (
                 <div className="border border-gray-200 rounded-md p-4 bg-gray-50">
                   <div className="text-sm text-gray-600 mb-3">
-                    No hay ubicación configurada. El mapa usará el centro predeterminado.
+                    No hay una ubicación configurada.
                   </div>
                   <button
                     onClick={() => setShowMap(true)}
                     className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition"
                   >
-                    Seleccionar ubicación en mapa
+                    Seleccionar ubicación
                   </button>
                 </div>
               )}
@@ -207,8 +184,7 @@ export default function OfficeSettingsPage() {
                 <div className="text-sm text-blue-800">
                   <p className="font-medium mb-1">¿Para qué sirve esto?</p>
                   <p>
-                    Cuando los técnicos abran el mapa, este se centrará automáticamente en la ubicación de tu oficina.
-                    Esto facilita la visualización de la operación alrededor de tu zona de trabajo.
+                    El mapa operativo se centrará inicialmente en la ubicación de tu oficina. Esto facilita la visualización de técnicos y tickets alrededor de tu zona de operación.
                   </p>
                 </div>
               </div>
