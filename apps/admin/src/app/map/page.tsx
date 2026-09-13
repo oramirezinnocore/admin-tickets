@@ -420,7 +420,7 @@ export default function MapPage() {
       return;
     }
 
-    console.log('[MAP OFFICE] Centering on office:', officeCoords);
+    console.log('[MAP VIEWPORT] office flyTo', officeCoords);
 
     mapRef.current.flyTo({
       center: officeCoords,
@@ -572,20 +572,9 @@ export default function MapPage() {
 
       setTechnicians(combined);
 
-      // Fit bounds to technicians with locations
-      if (mapRef.current && combined.length > 0) {
-        const techsWithLocation = combined.filter(t => t.location);
-        if (techsWithLocation.length > 0) {
-          const maplibregl = await initMapLibre();
-          const bounds = new (maplibregl as any).LngLatBounds();
-          techsWithLocation.forEach(tech => {
-            if (tech.location) {
-              bounds.extend([tech.location.longitude, tech.location.latitude]);
-            }
-          });
-          mapRef.current.fitBounds(bounds, { padding: 50, maxZoom: 14 });
-        }
-      }
+      // DO NOT auto-fit bounds to technicians
+      // This overwrites office center and other intentional viewport settings
+      // Only fit bounds when user explicitly selects a technician or route
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -868,6 +857,7 @@ export default function MapPage() {
     setSelectedTech(techId);
     const tech = technicians.find(t => t.id === techId);
     if (tech?.location && mapRef.current) {
+      console.log('[MAP VIEWPORT] selected tech flyTo', tech.profile.full_name);
       mapRef.current.flyTo({
         center: [tech.location.longitude, tech.location.latitude],
         zoom: 14,
@@ -995,6 +985,7 @@ export default function MapPage() {
 
     // Fit bounds to OSRM route geometry
     if (routeGeometry.coordinates.length > 1) {
+      console.log('[MAP VIEWPORT] route fitBounds');
       const bounds = new (maplibregl as any).LngLatBounds();
       routeGeometry.coordinates.forEach((coord: [number, number]) => bounds.extend(coord));
       mapRef.current.fitBounds(bounds, { padding: 50 });
