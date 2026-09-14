@@ -23,7 +23,6 @@ import {
   hasValidCoordinates,
 } from '@wisper/shared';
 import TicketActivityTimeline from '@/components/TicketActivity';
-import { resolveTicketAdminAction } from './actions';
 
 interface TicketWithRelations extends Ticket {
   client: Client;
@@ -224,20 +223,57 @@ export default function TicketDetailPage() {
     return ticket.status !== 'RESOLVED' && ticket.status !== 'CANCELLED';
   }
 
-  async function handleResolve(reason: string) {
+  async function handleResolve(reason: string, evidenceFile?: File) {
     if (!ticket) return;
 
-    const result = await resolveTicketAdminAction(ticket.id, reason);
+    try {
+      // Get session token
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('Sesión no válida');
+      }
 
-    if (result.error) {
-      alert('Error: ' + result.error);
-      return;
+      // Prepare request body
+      const body: any = { reason };
+
+      // Convert evidence file to data URL if provided
+      if (evidenceFile) {
+        const reader = new FileReader();
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(evidenceFile);
+        });
+
+        body.evidenceDataUrl = dataUrl;
+        body.evidenceFilename = evidenceFile.name;
+        body.evidenceMimeType = evidenceFile.type;
+      }
+
+      // Call API route
+      const response = await fetch(`/api/tickets/${ticket.id}/resolve`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify(body),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'No se pudo resolver el ticket');
+      }
+
+      // Success - modal will handle UI feedback
+      setIsResolveModalOpen(false);
+      await loadTicket();
+      await loadHistory();
+    } catch (error: any) {
+      // Re-throw to let modal handle error display
+      throw error;
     }
-
-    alert('Ticket resuelto exitosamente');
-    setIsResolveModalOpen(false);
-    await loadTicket();
-    await loadHistory();
   }
 
   function getSlaColor(slaState: string): string {

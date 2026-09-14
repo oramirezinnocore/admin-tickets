@@ -304,7 +304,7 @@ export default function DashboardPage() {
         <Link href="/tickets?filter=today" className="block hover:scale-105 transition-transform">
           <StatCard label="Tickets hoy" value={stats.createdToday} sublabel="Reportados" />
         </Link>
-        <Link href="/tickets?status=RESOLVED&filter=today" className="block hover:scale-105 transition-transform">
+        <Link href="/tickets?status=RESOLVED&period=today" className="block hover:scale-105 transition-transform">
           <StatCard label="Resueltos hoy" value={stats.resolvedToday} sublabel="Cerrados" color="green" />
         </Link>
         <Link href="/tickets?status=PENDING,ASSIGNED,IN_REVIEW,PAUSED" className="block hover:scale-105 transition-transform">
