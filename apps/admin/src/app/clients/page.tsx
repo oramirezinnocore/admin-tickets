@@ -496,7 +496,7 @@ function ClientFormModal({ isOpen, onClose, onSuccess, client }: ClientFormModal
         <MapLocationPicker
           initialLatitude={formData.latitude ? parseFloat(formData.latitude) : undefined}
           initialLongitude={formData.longitude ? parseFloat(formData.longitude) : undefined}
-          onLocationSelect={(lat, lng) => {
+          onLocationSelect={(lat, lng, address) => {
             setFormData({
               ...formData,
               latitude: lat.toString(),

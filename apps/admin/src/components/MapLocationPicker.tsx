@@ -9,7 +9,7 @@ interface MapLocationPickerProps {
   initialLatitude?: number;
   initialLongitude?: number;
   initialAddress?: string;
-  onLocationSelect: (latitude: number, longitude: number) => void;
+  onLocationSelect: (latitude: number, longitude: number, address: string) => void;
   onCancel: () => void;
 }
 
@@ -338,7 +338,7 @@ export default function MapLocationPicker({
       alert('Las coordenadas seleccionadas no son válidas');
       return;
     }
-    onLocationSelect(latitude, longitude);
+    onLocationSelect(latitude, longitude, selectedAddress);
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {

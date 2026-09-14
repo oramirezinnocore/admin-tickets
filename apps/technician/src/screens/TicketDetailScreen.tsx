@@ -372,7 +372,16 @@ export default function TicketDetailScreen() {
   }
 
   function handleSignatureBegin() {
+    console.log('[Signature] onBegin fired');
     setHasSignatureStrokes(true);
+  }
+
+  function handleSignatureDraw() {
+    // Fallback in case onBegin doesn't fire reliably
+    console.log('[Signature] onDraw fired');
+    if (!hasSignatureStrokes) {
+      setHasSignatureStrokes(true);
+    }
   }
 
   function handleCancelSignature() {
@@ -818,9 +827,11 @@ export default function TicketDetailScreen() {
               ref={signatureRef}
               onOK={handleSignatureOK}
               onEmpty={() => {
+                console.log('[Signature] onEmpty fired');
                 setHasSignatureStrokes(false);
               }}
               onBegin={handleSignatureBegin}
+              onDraw={handleSignatureDraw}
               descriptionText="Firma dentro del recuadro"
               webStyle={`.m-signature-pad {box-shadow: none; border: 1px solid #e5e7eb;} .m-signature-pad--body {border: none;} .m-signature-pad--footer {display: none; margin: 0px;}`}
             />
