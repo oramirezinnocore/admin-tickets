@@ -245,10 +245,48 @@ export async function uploadSignature(
     console.log('[Signature] bucket: ticket-signatures');
     console.log('[Signature] path:', fileName);
     console.log('[Signature] ticketId:', ticketId);
+    console.log('[Signature] signatureUri type:', signatureUri.substring(0, 30));
 
-    // Convert URI to blob
-    const response = await fetch(signatureUri);
-    const blob = await response.blob();
+    // Convert data URI to blob
+    // Signature from react-native-signature-canvas is data:image/png;base64,...
+    // Android fetch() does NOT support data URIs, so we must convert manually
+    let blob: Blob;
+
+    if (signatureUri.startsWith('data:')) {
+      console.log('[Signature] Converting data URI to blob (Android-compatible)');
+
+      // Split data URI
+      const [header, base64Data] = signatureUri.split(',');
+
+      if (!base64Data) {
+        throw new Error('Invalid data URI format');
+      }
+
+      // Extract MIME type
+      const mimeMatch = header.match(/data:(.*?);/);
+      const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
+
+      console.log('[Signature] MIME type:', mimeType);
+      console.log('[Signature] Base64 length:', base64Data.length);
+
+      // Decode base64 to binary string
+      const binaryString = atob(base64Data);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+
+      // Create blob from byte array
+      blob = new Blob([bytes], { type: mimeType });
+      console.log('[Signature] Blob created - size:', blob.size, 'type:', blob.type);
+    } else {
+      // If not a data URI, try fetch (for file:// URIs)
+      console.log('[Signature] Using fetch for non-data URI');
+      const response = await fetch(signatureUri);
+      blob = await response.blob();
+    }
 
     // Upload to storage
     const { error: uploadError } = await supabase.storage
