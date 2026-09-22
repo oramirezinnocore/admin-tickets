@@ -69,6 +69,10 @@ export default function TicketDetailScreen() {
   const [savingSignature, setSavingSignature] = useState(false);
   const signatureRef = useRef<any>(null);
 
+  // Pause modal state
+  const [showPauseModal, setShowPauseModal] = useState(false);
+  const [pauseReason, setPauseReason] = useState('');
+
   useEffect(() => {
     loadTicket();
   }, [ticketId]);
@@ -175,46 +179,58 @@ export default function TicketDetailScreen() {
     }
   }
 
-  async function handlePause() {
-    Alert.prompt(
-      'Pausar ticket',
-      'Indica la razón',
-      async (reason: string) => {
-        if (!reason.trim()) return;
+  function handlePause() {
+    // Open modal instead of Alert.prompt (Alert.prompt doesn't work on Android)
+    setPauseReason('');
+    setShowPauseModal(true);
+  }
 
-        try {
-          setSaving(true);
+  async function handleConfirmPause() {
+    const reason = pauseReason.trim();
 
-          // Update status - trigger will log to history automatically
-          const { error } = await supabase
-            .from('tickets')
-            .update({ status: 'PAUSED' })
-            .eq('id', ticketId);
+    if (!reason) {
+      Alert.alert('Error', 'El motivo de la pausa es obligatorio');
+      return;
+    }
 
-          if (error) throw error;
+    console.log('[PAUSE] Starting pause flow');
+    console.log('[PAUSE] Current status:', ticket?.status);
+    console.log('[PAUSE] Reason:', reason);
 
-          // Optionally update the auto-generated history record with notes
-          // Note: This updates the most recent history entry for this ticket
-          if (reason.trim()) {
-            await supabase
-              .from('ticket_status_history')
-              .update({ notes: reason.trim() })
-              .eq('ticket_id', ticketId)
-              .eq('new_status', 'PAUSED')
-              .order('created_at', { ascending: false })
-              .limit(1);
-          }
+    try {
+      setSaving(true);
+      setShowPauseModal(false);
 
-          await loadTicket();
-          Alert.alert('Éxito', 'Ticket pausado');
-        } catch (error: any) {
-          Alert.alert('Error', error.message);
-        } finally {
-          setSaving(false);
-        }
-      },
-      'plain-text'
-    );
+      // Update status - trigger will log to history automatically
+      const { error } = await supabase
+        .from('tickets')
+        .update({ status: 'PAUSED' })
+        .eq('id', ticketId);
+
+      console.log('[PAUSE] Update result:', { error });
+
+      if (error) throw error;
+
+      // Optionally update the auto-generated history record with notes
+      // Note: This updates the most recent history entry for this ticket
+      if (reason) {
+        await supabase
+          .from('ticket_status_history')
+          .update({ notes: reason })
+          .eq('ticket_id', ticketId)
+          .eq('new_status', 'PAUSED')
+          .order('created_at', { ascending: false })
+          .limit(1);
+      }
+
+      await loadTicket();
+      Alert.alert('Éxito', 'Ticket pausado');
+    } catch (error: any) {
+      console.error('[PAUSE] Error:', error);
+      Alert.alert('Error', error.message);
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleResume() {
@@ -564,7 +580,7 @@ export default function TicketDetailScreen() {
   const canStart = ticket?.status === 'ASSIGNED' || ticket?.status === 'PENDING';
   const canPause = ticket?.status === 'IN_REVIEW' || ticket?.status === 'ASSIGNED';
   const canResume = ticket?.status === 'PAUSED';
-  const canClose = ticket?.status === 'IN_REVIEW' || ticket?.status === 'PAUSED';
+  const canClose = ticket?.status === 'ASSIGNED' || ticket?.status === 'IN_REVIEW' || ticket?.status === 'PAUSED';
 
   if (loading) {
     return (
@@ -861,6 +877,54 @@ export default function TicketDetailScreen() {
                 <Text style={styles.signatureConfirmButtonText}>Usar esta firma</Text>
               )}
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Pause Modal */}
+      <Modal
+        visible={showPauseModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowPauseModal(false)}
+      >
+        <View style={styles.pauseModalContainer}>
+          <View style={styles.pauseModalContent}>
+            <Text style={styles.pauseModalTitle}>Pausar ticket</Text>
+            <Text style={styles.pauseModalLabel}>Motivo de la pausa *</Text>
+            <TextInput
+              style={styles.pauseModalInput}
+              multiline
+              numberOfLines={4}
+              value={pauseReason}
+              onChangeText={setPauseReason}
+              placeholder="Indica por qué necesitas pausar el ticket..."
+              editable={!saving}
+            />
+
+            <View style={styles.pauseModalButtons}>
+              <TouchableOpacity
+                style={[styles.pauseModalButton, styles.pauseModalCancelButton]}
+                onPress={() => setShowPauseModal(false)}
+                disabled={saving}
+              >
+                <Text style={styles.pauseModalButtonText}>Cancelar</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.pauseModalButton,
+                  styles.pauseModalConfirmButton,
+                  (saving || !pauseReason.trim()) && styles.pauseModalButtonDisabled,
+                ]}
+                onPress={handleConfirmPause}
+                disabled={saving || !pauseReason.trim()}
+              >
+                <Text style={[styles.pauseModalButtonText, styles.pauseModalConfirmButtonText]}>
+                  {saving ? 'Pausando...' : 'Pausar soporte'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1189,5 +1253,67 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: 'white',
     fontWeight: 'bold',
+  },
+  pauseModalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  pauseModalContent: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 24,
+    width: '90%',
+    maxWidth: 400,
+  },
+  pauseModalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#111827',
+    marginBottom: 16,
+  },
+  pauseModalLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 8,
+  },
+  pauseModalInput: {
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    minHeight: 100,
+    textAlignVertical: 'top',
+    marginBottom: 20,
+  },
+  pauseModalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  pauseModalButton: {
+    flex: 1,
+    padding: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  pauseModalCancelButton: {
+    backgroundColor: '#E5E7EB',
+  },
+  pauseModalConfirmButton: {
+    backgroundColor: '#F59E0B',
+  },
+  pauseModalButtonDisabled: {
+    opacity: 0.5,
+  },
+  pauseModalButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  pauseModalConfirmButtonText: {
+    color: 'white',
   },
 });
