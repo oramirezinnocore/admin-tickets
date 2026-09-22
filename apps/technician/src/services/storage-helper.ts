@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { writeAsStringAsync, cacheDirectory, deleteAsync } from 'expo-file-system/legacy';
 
 export async function uploadEvidence(
   ticketId: string,
@@ -235,6 +236,8 @@ export async function uploadSignature(
   latitude: number | null,
   longitude: number | null
 ): Promise<{ success: boolean; error?: string }> {
+  let tempFilePath: string | null = null;
+
   try {
     // Generate filename
     const timestamp = Date.now();
@@ -247,46 +250,49 @@ export async function uploadSignature(
     console.log('[Signature] ticketId:', ticketId);
     console.log('[Signature] signatureUri type:', signatureUri.substring(0, 30));
 
-    // Convert data URI to blob
-    // Signature from react-native-signature-canvas is data:image/png;base64,...
-    // Android fetch() does NOT support data URIs, so we must convert manually
-    let blob: Blob;
+    // Convert data URI to file:// URI using temp file
+    // This is the ONLY Android-compatible approach that works
+    let fileUri: string;
 
     if (signatureUri.startsWith('data:')) {
-      console.log('[Signature] Converting data URI to blob (Android-compatible)');
+      console.log('[Signature] Converting data URI to temp file (Android-compatible)');
 
-      // Split data URI
+      // Split data URI: data:image/png;base64,PAYLOAD
       const [header, base64Data] = signatureUri.split(',');
 
       if (!base64Data) {
         throw new Error('Invalid data URI format');
       }
 
-      // Extract MIME type
-      const mimeMatch = header.match(/data:(.*?);/);
-      const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
-
-      console.log('[Signature] MIME type:', mimeType);
-      console.log('[Signature] Base64 length:', base64Data.length);
-
-      // Decode base64 to binary string
-      const binaryString = atob(base64Data);
-      const len = binaryString.length;
-      const bytes = new Uint8Array(len);
-
-      for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
+      if (!cacheDirectory) {
+        throw new Error('Cache directory not available');
       }
 
-      // Create blob from byte array
-      blob = new Blob([bytes], { type: mimeType });
-      console.log('[Signature] Blob created - size:', blob.size, 'type:', blob.type);
+      console.log('[Signature] Base64 length:', base64Data.length);
+
+      // Write base64 to temporary file using Expo FileSystem legacy API
+      // This avoids Blob(ArrayBuffer) which React Native Android doesn't support
+      tempFilePath = `${cacheDirectory}signature-${ticketId}-${timestamp}.png`;
+      console.log('[Signature] Writing temp file:', tempFilePath);
+
+      await writeAsStringAsync(tempFilePath, base64Data, {
+        encoding: 'base64',
+      });
+
+      console.log('[Signature] Temp file written successfully');
+      fileUri = tempFilePath;
     } else {
-      // If not a data URI, try fetch (for file:// URIs)
-      console.log('[Signature] Using fetch for non-data URI');
-      const response = await fetch(signatureUri);
-      blob = await response.blob();
+      // Already a file:// URI (shouldn't happen for signatures, but handle it)
+      console.log('[Signature] Already a file URI');
+      fileUri = signatureUri;
     }
+
+    // Now use the same fetch(file://) pattern that works for evidence
+    // This is proven to work on Android
+    console.log('[Signature] Fetching file:', fileUri);
+    const response = await fetch(fileUri);
+    const blob = await response.blob();
+    console.log('[Signature] Blob created - size:', blob.size, 'type:', blob.type);
 
     // Upload to storage
     const { error: uploadError } = await supabase.storage
@@ -342,6 +348,17 @@ export async function uploadSignature(
   } catch (error: any) {
     console.error('[Signature] Error:', error);
     return { success: false, error: error.message };
+  } finally {
+    // Cleanup temporary file if it was created
+    if (tempFilePath) {
+      try {
+        console.log('[Signature] Cleaning up temp file:', tempFilePath);
+        await deleteAsync(tempFilePath, { idempotent: true });
+        console.log('[Signature] Temp file deleted');
+      } catch (cleanupError) {
+        console.warn('[Signature] Temp file cleanup failed (non-critical):', cleanupError);
+      }
+    }
   }
 }
 
