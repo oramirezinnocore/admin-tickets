@@ -5,12 +5,15 @@ import ProtectedLayout from '@/components/ProtectedLayout';
 import Modal from '@/components/ui/Modal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import MapLocationPicker from '@/components/MapLocationPicker';
+import ClientImportModal from '@/components/ClientImportModal';
 import { supabase } from '@/lib/supabase';
-import { Client, hasValidCoordinates } from '@wisper/shared';
+import { useAuth } from '@/lib/auth-context';
+import { Client, hasValidCoordinates, UserRole } from '@wisper/shared';
 
 type ClientFilter = 'active' | 'inactive' | 'all';
 
 export default function ClientsPage() {
+  const { profile } = useAuth();
   const [clients, setClients] = useState<Client[]>([]);
   const [filteredClients, setFilteredClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
@@ -19,6 +22,7 @@ export default function ClientsPage() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [error, setError] = useState('');
 
@@ -143,12 +147,22 @@ export default function ClientsPage() {
             onChange={e => setSearchQuery(e.target.value)}
             className="flex-1 px-4 py-2 border rounded-md"
           />
-          <button
-            onClick={handleCreate}
-            className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
-          >
-            Nuevo cliente
-          </button>
+          <div className="flex gap-2">
+            {profile?.role === UserRole.SUPER_ADMIN && (
+              <button
+                onClick={() => setIsImportModalOpen(true)}
+                className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition"
+              >
+                Importar clientes
+              </button>
+            )}
+            <button
+              onClick={handleCreate}
+              className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+            >
+              Nuevo cliente
+            </button>
+          </div>
         </div>
 
         <div className="flex gap-2">
@@ -285,6 +299,15 @@ export default function ClientsPage() {
         }
         confirmText={selectedClient?.is_active ? 'Desactivar' : 'Reactivar'}
         isDestructive={selectedClient?.is_active}
+      />
+
+      <ClientImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        onSuccess={() => {
+          setIsImportModalOpen(false);
+          loadClients();
+        }}
       />
     </ProtectedLayout>
   );
