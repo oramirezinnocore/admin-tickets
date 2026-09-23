@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import Papa from 'papaparse';
 import { hasValidCoordinates } from '@wisper/shared';
 
 const IMPORT_LIMIT = 1000;
+const GEOCODE_BATCH_SIZE = 5; // Max concurrent geocoding requests
 
 interface ImportRow {
   name: string;
@@ -19,6 +20,80 @@ interface ValidationResult {
   data: ImportRow;
   errors: string[];
   isValid: boolean;
+  coordinateSource?: 'csv' | 'geocoded';
+}
+
+interface GeocodeResult {
+  success: boolean;
+  latitude?: number;
+  longitude?: number;
+  error?: string;
+}
+
+/**
+ * Geocode a single address using the existing /api/geocode endpoint
+ */
+async function geocodeAddress(address: string): Promise<GeocodeResult> {
+  try {
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    const url = new URL('/api/geocode', baseUrl);
+    url.searchParams.set('q', address);
+
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      return { success: false, error: 'Geocoding service unavailable' };
+    }
+
+    const data = await response.json();
+
+    // Check if we got results
+    if (!data || !Array.isArray(data) || data.length === 0) {
+      return { success: false, error: 'Address not found' };
+    }
+
+    const firstResult = data[0];
+    if (
+      typeof firstResult.latitude === 'number' &&
+      typeof firstResult.longitude === 'number' &&
+      hasValidCoordinates(firstResult.latitude, firstResult.longitude)
+    ) {
+      return {
+        success: true,
+        latitude: firstResult.latitude,
+        longitude: firstResult.longitude,
+      };
+    }
+
+    return { success: false, error: 'Invalid coordinates from geocoder' };
+  } catch (error) {
+    console.error('[Geocode] Error:', error);
+    return { success: false, error: 'Geocoding failed' };
+  }
+}
+
+/**
+ * Process items in batches with concurrency control
+ */
+async function processBatch<T, R>(
+  items: T[],
+  batchSize: number,
+  processor: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = [];
+
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    const batchResults = await Promise.all(batch.map(processor));
+    results.push(...batchResults);
+  }
+
+  return results;
 }
 
 export async function POST(request: NextRequest) {
@@ -78,12 +153,11 @@ export async function POST(request: NextRequest) {
     } else {
       return NextResponse.json({ error: 'Acción inválida' }, { status: 400 });
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[Import] Error:', error);
-    return NextResponse.json(
-      { error: error.message || 'Error interno del servidor' },
-      { status: 500 }
-    );
+    const errorMessage =
+      error instanceof Error ? error.message : 'Error interno del servidor';
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }
 
@@ -150,9 +224,10 @@ async function handleValidation(csvContent: string) {
     );
   }
 
-  // Validate each row
+  // PHASE 1: Initial validation
   const validationResults: ValidationResult[] = [];
   const seenKeys = new Set<string>();
+  const rowsNeedingGeocode: Array<{ index: number; address: string }> = [];
 
   rows.forEach((row, index) => {
     const errors: string[] = [];
@@ -167,22 +242,6 @@ async function handleValidation(csvContent: string) {
       errors.push('La dirección es obligatoria');
     }
 
-    // Validate coordinates if provided
-    if (row.latitude || row.longitude) {
-      const lat = row.latitude ? parseFloat(row.latitude) : null;
-      const lng = row.longitude ? parseFloat(row.longitude) : null;
-
-      if (
-        lat === null ||
-        lng === null ||
-        isNaN(lat) ||
-        isNaN(lng) ||
-        !hasValidCoordinates(lat, lng)
-      ) {
-        errors.push('Las coordenadas proporcionadas no son válidas');
-      }
-    }
-
     // Check for duplicates within the file (based on name+address)
     if (row.name && row.address) {
       const key = `${row.name.trim().toLowerCase()}|${row.address.trim().toLowerCase()}`;
@@ -193,12 +252,83 @@ async function handleValidation(csvContent: string) {
       }
     }
 
+    // Coordinate validation logic
+    const hasLat = row.latitude && row.latitude.trim() !== '';
+    const hasLng = row.longitude && row.longitude.trim() !== '';
+
+    if (hasLat && hasLng) {
+      // Both provided - validate them
+      const lat = parseFloat(row.latitude!);
+      const lng = parseFloat(row.longitude!);
+
+      if (isNaN(lat) || isNaN(lng) || !hasValidCoordinates(lat, lng)) {
+        errors.push('Las coordenadas proporcionadas no son válidas');
+      }
+    } else if (hasLat || hasLng) {
+      // Partial coordinates - invalid
+      errors.push(
+        'Debe proporcionar ambas coordenadas (latitude y longitude) o ninguna. Solo una coordenada no es válida.'
+      );
+    } else if (row.address && row.address.trim()) {
+      // No coordinates provided - will need geocoding
+      rowsNeedingGeocode.push({
+        index,
+        address: row.address.trim(),
+      });
+    }
+
     validationResults.push({
       row: rowNumber,
       data: row,
       errors,
       isValid: errors.length === 0,
+      coordinateSource: hasLat && hasLng ? 'csv' : undefined,
     });
+  });
+
+  // PHASE 2: Geocode addresses for rows without coordinates
+  if (rowsNeedingGeocode.length > 0) {
+    console.log(`[Import] Geocoding ${rowsNeedingGeocode.length} addresses...`);
+
+    const geocodeResults = await processBatch(
+      rowsNeedingGeocode,
+      GEOCODE_BATCH_SIZE,
+      async item => {
+        const result = await geocodeAddress(item.address);
+        return { ...item, geocode: result };
+      }
+    );
+
+    // Apply geocoding results
+    geocodeResults.forEach(({ index, geocode }) => {
+      const validation = validationResults[index];
+
+      if (geocode.success && geocode.latitude && geocode.longitude) {
+        // Success: update data with geocoded coordinates
+        validation.data.latitude = geocode.latitude.toString();
+        validation.data.longitude = geocode.longitude.toString();
+        validation.coordinateSource = 'geocoded';
+      } else {
+        // Failed: mark as invalid
+        validation.errors.push(
+          `No se pudo geocodificar la dirección: ${geocode.error || 'dirección no encontrada'}`
+        );
+        validation.isValid = false;
+      }
+    });
+  }
+
+  // PHASE 3: Final validation - ensure all rows have coordinates
+  validationResults.forEach(result => {
+    if (result.isValid) {
+      const hasLat = result.data.latitude && result.data.latitude.trim() !== '';
+      const hasLng = result.data.longitude && result.data.longitude.trim() !== '';
+
+      if (!hasLat || !hasLng) {
+        result.errors.push('No se pudieron obtener coordenadas válidas para esta dirección');
+        result.isValid = false;
+      }
+    }
   });
 
   const validCount = validationResults.filter(r => r.isValid).length;
@@ -214,7 +344,10 @@ async function handleValidation(csvContent: string) {
   });
 }
 
-async function handleImport(supabase: any, validatedRows: ValidationResult[]) {
+async function handleImport(
+  supabase: SupabaseClient,
+  validatedRows: ValidationResult[]
+) {
   if (!Array.isArray(validatedRows) || validatedRows.length === 0) {
     return NextResponse.json(
       { error: 'No hay registros válidos para importar' },
@@ -237,13 +370,26 @@ async function handleImport(supabase: any, validatedRows: ValidationResult[]) {
     const lat = row.latitude ? parseFloat(row.latitude) : null;
     const lng = row.longitude ? parseFloat(row.longitude) : null;
 
+    // Validate coordinates exist and are valid
+    if (lat === null || lng === null || isNaN(lat) || isNaN(lng)) {
+      throw new Error(
+        `Fila ${result.row}: No tiene coordenadas válidas. Este error no debería ocurrir después de la validación.`
+      );
+    }
+
+    if (!hasValidCoordinates(lat, lng)) {
+      throw new Error(
+        `Fila ${result.row}: Las coordenadas están fuera del rango válido. Este error no debería ocurrir después de la validación.`
+      );
+    }
+
     return {
       name: row.name.trim(),
       address: row.address.trim(),
       phone: row.phone?.trim() || null,
       reference: row.reference?.trim() || null,
-      latitude: lat && !isNaN(lat) ? lat : null,
-      longitude: lng && !isNaN(lng) ? lng : null,
+      latitude: lat,
+      longitude: lng,
       is_active: true,
     };
   });
