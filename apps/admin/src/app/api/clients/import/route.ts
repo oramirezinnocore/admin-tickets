@@ -3,14 +3,16 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import Papa from 'papaparse';
 import { hasValidCoordinates } from '@wisper/shared';
 
-const IMPORT_LIMIT = 1000;
+const IMPORT_LIMIT = 10000;
 const GEOCODE_BATCH_SIZE = 5; // Max concurrent geocoding requests
+const DB_BATCH_SIZE = 500; // Database insert batch size
 
 interface ImportRow {
   name: string;
   address: string;
   phone?: string;
   reference?: string;
+  coordinates?: string;
   latitude?: string;
   longitude?: string;
 }
@@ -20,7 +22,8 @@ interface ValidationResult {
   data: ImportRow;
   errors: string[];
   isValid: boolean;
-  coordinateSource?: 'csv' | 'geocoded';
+  coordinateSource?: 'csv' | 'csv-dms' | 'geocoded';
+  originalCoordinates?: string;
 }
 
 interface GeocodeResult {
@@ -28,6 +31,162 @@ interface GeocodeResult {
   latitude?: number;
   longitude?: number;
   error?: string;
+}
+
+interface DMSParseResult {
+  success: boolean;
+  latitude?: number;
+  longitude?: number;
+  error?: string;
+}
+
+/**
+ * Normalize DMS components (handle seconds >= 60, minutes >= 60)
+ */
+function normalizeDMS(degrees: number, minutes: number, seconds: number): {
+  degrees: number;
+  minutes: number;
+  seconds: number;
+} {
+  // Normalize seconds (60s = 1m)
+  if (seconds >= 60) {
+    const extraMinutes = Math.floor(seconds / 60);
+    minutes += extraMinutes;
+    seconds = seconds % 60;
+  }
+
+  // Normalize minutes (60m = 1°)
+  if (minutes >= 60) {
+    const extraDegrees = Math.floor(minutes / 60);
+    degrees += extraDegrees;
+    minutes = minutes % 60;
+  }
+
+  return { degrees, minutes, seconds };
+}
+
+/**
+ * Convert DMS (Degrees Minutes Seconds) to decimal degrees
+ */
+function dmsToDecimal(
+  degrees: number,
+  minutes: number,
+  seconds: number,
+  direction: string
+): number {
+  // Normalize components first
+  const normalized = normalizeDMS(degrees, minutes, seconds);
+
+  // Convert to decimal
+  let decimal =
+    normalized.degrees + normalized.minutes / 60 + normalized.seconds / 3600;
+
+  // Apply negative sign for South/West
+  const dir = direction.toUpperCase();
+  if (dir === 'S' || dir === 'W') {
+    decimal = -decimal;
+  }
+
+  return decimal;
+}
+
+/**
+ * Parse DMS coordinate string
+ * Supports formats like:
+ * - 19°01'13.4"N 101°06'60.0"W
+ * - 19° 01' 13.4" N, 101° 06' 59.0" W
+ * - 19°01'13.4"N 101°06'59.0"W
+ */
+function parseDMS(coordinatesStr: string): DMSParseResult {
+  try {
+    // Remove extra spaces and normalize
+    const normalized = coordinatesStr.trim().replace(/\s+/g, ' ');
+
+    // Regex to match DMS format
+    // Matches: degrees°minutes'seconds"direction
+    const dmsRegex =
+      /(-?\d+(?:\.\d+)?)\s*[°º]\s*(\d+(?:\.\d+)?)\s*[''′]\s*(\d+(?:\.\d+)?)\s*[""″]\s*([NSEWnsew])/g;
+
+    const matches = [...normalized.matchAll(dmsRegex)];
+
+    if (matches.length < 2) {
+      return {
+        success: false,
+        error: 'Formato DMS inválido. Se esperan dos coordenadas (latitud y longitud).',
+      };
+    }
+
+    // First match should be latitude (N/S)
+    const [, lat_deg, lat_min, lat_sec, lat_dir] = matches[0];
+    const latDirection = lat_dir.toUpperCase();
+
+    if (latDirection !== 'N' && latDirection !== 'S') {
+      return {
+        success: false,
+        error: 'La primera coordenada debe ser latitud (N o S).',
+      };
+    }
+
+    // Second match should be longitude (E/W)
+    const [, lng_deg, lng_min, lng_sec, lng_dir] = matches[1];
+    const lngDirection = lng_dir.toUpperCase();
+
+    if (lngDirection !== 'E' && lngDirection !== 'W') {
+      return {
+        success: false,
+        error: 'La segunda coordenada debe ser longitud (E o W).',
+      };
+    }
+
+    // Convert to decimal
+    const latitude = dmsToDecimal(
+      parseFloat(lat_deg),
+      parseFloat(lat_min),
+      parseFloat(lat_sec),
+      latDirection
+    );
+
+    const longitude = dmsToDecimal(
+      parseFloat(lng_deg),
+      parseFloat(lng_min),
+      parseFloat(lng_sec),
+      lngDirection
+    );
+
+    // Validate ranges
+    if (latitude < -90 || latitude > 90) {
+      return {
+        success: false,
+        error: `Latitud fuera de rango: ${latitude.toFixed(6)} (debe estar entre -90 y 90)`,
+      };
+    }
+
+    if (longitude < -180 || longitude > 180) {
+      return {
+        success: false,
+        error: `Longitud fuera de rango: ${longitude.toFixed(6)} (debe estar entre -180 y 180)`,
+      };
+    }
+
+    // Final validation using hasValidCoordinates
+    if (!hasValidCoordinates(latitude, longitude)) {
+      return {
+        success: false,
+        error: 'Las coordenadas DMS convertidas no son válidas',
+      };
+    }
+
+    return {
+      success: true,
+      latitude,
+      longitude,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Error al parsear coordenadas DMS',
+    };
+  }
 }
 
 /**
@@ -199,7 +358,7 @@ async function handleValidation(csvContent: string) {
   // Validate headers
   const headers = parseResult.meta.fields || [];
   const requiredHeaders = ['name', 'address'];
-  const optionalHeaders = ['phone', 'reference', 'latitude', 'longitude'];
+  const optionalHeaders = ['phone', 'reference', 'coordinates', 'latitude', 'longitude'];
   const validHeaders = [...requiredHeaders, ...optionalHeaders];
 
   const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
@@ -252,25 +411,45 @@ async function handleValidation(csvContent: string) {
       }
     }
 
-    // Coordinate validation logic
+    // Coordinate validation logic - Priority: decimal > DMS > geocoding
     const hasLat = row.latitude && row.latitude.trim() !== '';
     const hasLng = row.longitude && row.longitude.trim() !== '';
+    const hasDMS = row.coordinates && row.coordinates.trim() !== '';
+
+    let coordinateSource: 'csv' | 'csv-dms' | 'geocoded' | undefined = undefined;
+    let originalCoordinates: string | undefined = undefined;
 
     if (hasLat && hasLng) {
-      // Both provided - validate them
+      // PRIORITY 1: Decimal coordinates provided - validate and use
       const lat = parseFloat(row.latitude!);
       const lng = parseFloat(row.longitude!);
 
       if (isNaN(lat) || isNaN(lng) || !hasValidCoordinates(lat, lng)) {
-        errors.push('Las coordenadas proporcionadas no son válidas');
+        errors.push('Las coordenadas decimales proporcionadas no son válidas');
+      } else {
+        coordinateSource = 'csv';
       }
     } else if (hasLat || hasLng) {
-      // Partial coordinates - invalid
+      // Partial decimal coordinates - invalid
       errors.push(
         'Debe proporcionar ambas coordenadas (latitude y longitude) o ninguna. Solo una coordenada no es válida.'
       );
+    } else if (hasDMS) {
+      // PRIORITY 2: DMS coordinates provided - parse and convert
+      const dmsResult = parseDMS(row.coordinates!);
+
+      if (dmsResult.success && dmsResult.latitude && dmsResult.longitude) {
+        // Successfully parsed DMS - update row data with decimal values
+        row.latitude = dmsResult.latitude.toString();
+        row.longitude = dmsResult.longitude.toString();
+        coordinateSource = 'csv-dms';
+        originalCoordinates = row.coordinates!.trim();
+      } else {
+        // Failed to parse DMS
+        errors.push(`Coordenadas DMS inválidas: ${dmsResult.error || 'formato no reconocido'}`);
+      }
     } else if (row.address && row.address.trim()) {
-      // No coordinates provided - will need geocoding
+      // PRIORITY 3: No coordinates provided - will need geocoding
       rowsNeedingGeocode.push({
         index,
         address: row.address.trim(),
@@ -282,7 +461,8 @@ async function handleValidation(csvContent: string) {
       data: row,
       errors,
       isValid: errors.length === 0,
-      coordinateSource: hasLat && hasLng ? 'csv' : undefined,
+      coordinateSource,
+      originalCoordinates,
     });
   });
 
@@ -364,7 +544,7 @@ async function handleImport(
     );
   }
 
-  // Prepare batch insert
+  // Prepare clients for insertion
   const clientsToInsert = validatedRows.map(result => {
     const row = result.data;
     const lat = row.latitude ? parseFloat(row.latitude) : null;
@@ -394,20 +574,43 @@ async function handleImport(
     };
   });
 
-  // Batch insert
-  const { data, error } = await supabase.from('clients').insert(clientsToInsert).select();
+  // Batch insert in chunks to handle large imports efficiently
+  const allInsertedClients: any[] = [];
+  const totalBatches = Math.ceil(clientsToInsert.length / DB_BATCH_SIZE);
 
-  if (error) {
-    console.error('[Import] Database error:', error);
-    return NextResponse.json(
-      { error: 'Error al insertar clientes en la base de datos', details: error.message },
-      { status: 500 }
-    );
+  console.log(
+    `[Import] Inserting ${clientsToInsert.length} clients in ${totalBatches} batch(es) of ${DB_BATCH_SIZE}`
+  );
+
+  for (let i = 0; i < clientsToInsert.length; i += DB_BATCH_SIZE) {
+    const batch = clientsToInsert.slice(i, i + DB_BATCH_SIZE);
+    const batchNumber = Math.floor(i / DB_BATCH_SIZE) + 1;
+
+    console.log(`[Import] Processing batch ${batchNumber}/${totalBatches} (${batch.length} records)`);
+
+    const { data, error } = await supabase.from('clients').insert(batch).select();
+
+    if (error) {
+      console.error(`[Import] Database error in batch ${batchNumber}:`, error);
+      return NextResponse.json(
+        {
+          error: `Error al insertar clientes en la base de datos (batch ${batchNumber}/${totalBatches})`,
+          details: error.message,
+        },
+        { status: 500 }
+      );
+    }
+
+    if (data) {
+      allInsertedClients.push(...data);
+    }
   }
+
+  console.log(`[Import] Successfully inserted ${allInsertedClients.length} clients`);
 
   return NextResponse.json({
     success: true,
-    imported: data?.length || 0,
-    clients: data,
+    imported: allInsertedClients.length,
+    clients: allInsertedClients,
   });
 }

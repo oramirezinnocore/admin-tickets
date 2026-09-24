@@ -10,12 +10,14 @@ interface ValidationResult {
     address: string;
     phone?: string;
     reference?: string;
+    coordinates?: string;
     latitude?: string;
     longitude?: string;
   };
   errors: string[];
   isValid: boolean;
-  coordinateSource?: 'csv' | 'geocoded';
+  coordinateSource?: 'csv' | 'csv-dms' | 'geocoded';
+  originalCoordinates?: string;
 }
 
 interface ValidationResponse {
@@ -166,9 +168,10 @@ export default function ClientImportModal({
   }
 
   function downloadTemplate() {
-    const template = `name,address,phone,reference,latitude,longitude
-Juan Pérez,Av. Madero Poniente 123 Morelia Michoacán,3121234567,Cerca del mercado,,
-María González,Calle Hidalgo 456 Morelia Michoacán,3129876543,Edificio azul,19.7038,-101.1949`;
+    const template = `name,address,phone,reference,coordinates,latitude,longitude
+Juan Pérez,Av. Madero Poniente 123 Morelia Michoacán,3121234567,Cerca del mercado,,,
+María González,Calle Hidalgo 456 Morelia Michoacán,3129876543,Edificio azul,"19°42'13.7""N 101°11'53.6""W",,
+Pedro Martínez,Blvd. García de León Morelia,3129998877,Local 5,,,19.7038,-101.1949`;
 
     const blob = new Blob([template], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -188,11 +191,10 @@ María González,Calle Hidalgo 456 Morelia Michoacán,3129876543,Edificio azul,1
             <div className="flex-1">
               <p className="text-sm font-medium text-blue-900">Plantilla CSV</p>
               <p className="text-xs text-blue-700 mt-1">
-                Descarga la plantilla con los campos requeridos y ejemplos.
+                Descarga la plantilla con los campos requeridos y ejemplos. Límite: 10,000 registros.
               </p>
               <p className="text-xs text-blue-600 mt-1">
-                ℹ️ Las coordenadas (latitude, longitude) son opcionales. Si no las proporcionas,
-                se geocodificará automáticamente la dirección.
+                ℹ️ Coordenadas opcionales: puedes proporcionar DMS (coordinates), decimales (latitude/longitude), o dejar vacío para geocodificación automática.
               </p>
             </div>
             <button
@@ -236,7 +238,7 @@ María González,Calle Hidalgo 456 Morelia Michoacán,3129876543,Edificio azul,1
               <p className="mt-4 text-sm font-medium">
                 Arrastra tu archivo aquí o haz clic para seleccionar
               </p>
-              <p className="mt-1 text-xs text-gray-500">CSV hasta 1,000 registros</p>
+              <p className="mt-1 text-xs text-gray-500">CSV hasta 10,000 registros</p>
             </div>
           </div>
         )}
@@ -328,7 +330,13 @@ María González,Calle Hidalgo 456 Morelia Michoacán,3129876543,Edificio azul,1
                       Dirección
                     </th>
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                      Coordenadas
+                      Latitud
+                    </th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                      Longitud
+                    </th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                      Fuente
                     </th>
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
                       Estado
@@ -346,23 +354,44 @@ María González,Calle Hidalgo 456 Morelia Michoacán,3129876543,Edificio azul,1
                         {result.data.address}
                       </td>
                       <td className="px-3 py-2 text-sm text-gray-500">
-                        {result.data.latitude && result.data.longitude ? (
+                        {result.data.latitude ? (
+                          <span className="text-xs">
+                            {parseFloat(result.data.latitude).toFixed(6)}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-sm text-gray-500">
+                        {result.data.longitude ? (
+                          <span className="text-xs">
+                            {parseFloat(result.data.longitude).toFixed(6)}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-sm text-gray-500">
+                        {result.coordinateSource === 'csv' && (
+                          <span className="text-xs text-gray-700 font-medium">CSV decimal</span>
+                        )}
+                        {result.coordinateSource === 'csv-dms' && (
                           <div className="flex flex-col">
-                            <span className="text-xs">
-                              {parseFloat(result.data.latitude).toFixed(4)},{' '}
-                              {parseFloat(result.data.longitude).toFixed(4)}
-                            </span>
-                            {result.coordinateSource === 'geocoded' && (
-                              <span className="text-xs text-blue-600 font-medium">
-                                🌐 Geocodificado
+                            <span className="text-xs text-purple-700 font-medium">CSV DMS</span>
+                            {result.originalCoordinates && (
+                              <span className="text-xs text-gray-500" title={result.originalCoordinates}>
+                                {result.originalCoordinates.length > 20
+                                  ? result.originalCoordinates.substring(0, 20) + '...'
+                                  : result.originalCoordinates}
                               </span>
                             )}
-                            {result.coordinateSource === 'csv' && (
-                              <span className="text-xs text-gray-600">CSV</span>
-                            )}
                           </div>
-                        ) : (
-                          <span className="text-xs text-gray-400">Sin coordenadas</span>
+                        )}
+                        {result.coordinateSource === 'geocoded' && (
+                          <span className="text-xs text-blue-600 font-medium">🌐 Geocodificado</span>
+                        )}
+                        {!result.coordinateSource && (
+                          <span className="text-xs text-gray-400">-</span>
                         )}
                       </td>
                       <td className="px-3 py-2 text-sm">
