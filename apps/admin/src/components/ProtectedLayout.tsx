@@ -5,7 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useAuth } from '@/lib/auth-context';
-import { UserRole, getTicketSlaState, TicketSlaState, isAnyAdmin, canManageAdministrators } from '@wisper/shared';
+import { UserRole, getTicketSlaState, TicketSlaState, canAccessBackOffice, canManageAdministrators } from '@wisper/shared';
 import { supabase } from '@/lib/supabase';
 
 export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
@@ -16,7 +16,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
     if (!loading) {
       if (!user || !profile) {
         router.push('/login');
-      } else if (!isAnyAdmin(profile.role)) {
+      } else if (!canAccessBackOffice(profile.role)) {
         signOut().then(() => {
           router.push('/login');
         });
@@ -32,7 +32,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
     );
   }
 
-  if (!user || !profile || !isAnyAdmin(profile.role)) {
+  if (!user || !profile || !canAccessBackOffice(profile.role)) {
     return null;
   }
 
@@ -89,7 +89,7 @@ function Header() {
     { href: '/dashboard', label: 'Inicio' },
     { href: '/tickets', label: 'Tickets', badge: criticalCount > 0 ? criticalCount : undefined },
     { href: '/clients', label: 'Clientes' },
-    { href: '/technicians', label: 'Técnicos' },
+    { href: '/technicians', label: 'Personal' },
     { href: '/map', label: 'Mapa' },
   ];
 
@@ -126,7 +126,8 @@ function Header() {
               <div className="hidden sm:block text-right">
                 <p className="text-sm font-medium text-gray-900">{profile?.full_name}</p>
                 <p className="text-xs text-gray-500">
-                  {profile?.role === UserRole.SUPER_ADMIN ? 'Super Administrador' : 'Administrador'}
+                  {profile?.role === UserRole.SUPER_ADMIN ? 'Super Administrador' :
+                   profile?.role === UserRole.SUPPORT ? 'Soporte' : 'Administrador'}
                 </p>
               </div>
             </div>

@@ -29,3 +29,11 @@ export function isSuperAdmin(role: UserRole | string): boolean {
 export function isAnyAdmin(role: UserRole | string): boolean {
   return role === UserRole.ADMIN || role === UserRole.SUPER_ADMIN;
 }
+
+/**
+ * Check if a role can access back office
+ * (ADMIN, SUPER_ADMIN, or SUPPORT)
+ */
+export function canAccessBackOffice(role: UserRole | string): boolean {
+  return role === UserRole.ADMIN || role === UserRole.SUPER_ADMIN || role === UserRole.SUPPORT;
+}

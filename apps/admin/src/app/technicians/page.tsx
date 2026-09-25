@@ -5,47 +5,64 @@ import ProtectedLayout from '@/components/ProtectedLayout';
 import Modal from '@/components/ui/Modal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { supabase } from '@/lib/supabase';
-import { Profile, Technician } from '@wisper/shared';
+import { Profile, Technician, UserRole } from '@wisper/shared';
 
-interface TechnicianWithProfile extends Technician {
-  profile: Profile;
+interface PersonnelRecord extends Profile {
+  technician?: Technician | null;
 }
 
-type TechnicianFilter = 'active' | 'inactive' | 'all';
+type PersonnelFilter = 'active' | 'inactive' | 'all';
 
-export default function TechniciansPage() {
-  const [technicians, setTechnicians] = useState<TechnicianWithProfile[]>([]);
-  const [filteredTechnicians, setFilteredTechnicians] = useState<TechnicianWithProfile[]>([]);
+export default function PersonnelPage() {
+  const [personnel, setPersonnel] = useState<PersonnelRecord[]>([]);
+  const [filteredPersonnel, setFilteredPersonnel] = useState<PersonnelRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filter, setFilter] = useState<TechnicianFilter>('active');
+  const [filter, setFilter] = useState<PersonnelFilter>('active');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [selectedTechnician, setSelectedTechnician] = useState<TechnicianWithProfile | null>(null);
+  const [selectedPerson, setSelectedPerson] = useState<PersonnelRecord | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    loadTechnicians();
+    loadPersonnel();
   }, []);
 
   useEffect(() => {
-    filterTechnicians();
-  }, [technicians, searchQuery, filter]);
+    filterPersonnel();
+  }, [personnel, searchQuery, filter]);
 
-  async function loadTechnicians() {
+  async function loadPersonnel() {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('technicians')
-        .select(`
-          *,
-          profile:profiles(*)
-        `)
+
+      // Load all profiles (ADMIN, SUPPORT, TECHNICIAN) with left-joined technician data
+      const { data: profiles, error: profilesError } = await supabase
+        .from('profiles')
+        .select('*')
+        .in('role', ['ADMIN', 'SUPPORT', 'TECHNICIAN'])
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
-      setTechnicians((data as any) || []);
+      if (profilesError) throw profilesError;
+
+      // Load technicians separately
+      const { data: technicians, error: techniciansError } = await supabase
+        .from('technicians')
+        .select('*');
+
+      if (techniciansError) throw techniciansError;
+
+      // Merge data
+      const merged = (profiles || []).map(profile => {
+        const technician = (technicians || []).find(t => t.profile_id === profile.id);
+        return {
+          ...profile,
+          technician: technician || null
+        };
+      });
+
+      setPersonnel(merged);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -53,71 +70,88 @@ export default function TechniciansPage() {
     }
   }
 
-  function filterTechnicians() {
-    let filtered = technicians;
+  function filterPersonnel() {
+    let filtered = personnel;
 
     // Filter by status
     if (filter === 'active') {
-      filtered = filtered.filter(t => t.is_active && t.profile?.is_active);
+      filtered = filtered.filter(p => p.is_active);
     } else if (filter === 'inactive') {
-      filtered = filtered.filter(t => !t.is_active || !t.profile?.is_active);
+      filtered = filtered.filter(p => !p.is_active);
     }
 
     // Filter by search
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(
-        t =>
-          t.profile?.full_name.toLowerCase().includes(query) ||
-          t.profile?.email?.toLowerCase().includes(query) ||
-          t.profile?.phone?.toLowerCase().includes(query) ||
-          t.zone?.toLowerCase().includes(query)
+        p =>
+          p.full_name.toLowerCase().includes(query) ||
+          p.email?.toLowerCase().includes(query) ||
+          p.phone?.toLowerCase().includes(query) ||
+          p.technician?.zone?.toLowerCase().includes(query)
       );
     }
 
-    setFilteredTechnicians(filtered);
+    setFilteredPersonnel(filtered);
   }
 
   function handleCreate() {
-    setSelectedTechnician(null);
+    setSelectedPerson(null);
     setIsCreateModalOpen(true);
   }
 
-  function handleEdit(technician: TechnicianWithProfile) {
-    setSelectedTechnician(technician);
+  function handleEdit(person: PersonnelRecord) {
+    setSelectedPerson(person);
     setIsEditModalOpen(true);
   }
 
-  function handleDeactivate(technician: TechnicianWithProfile) {
-    setSelectedTechnician(technician);
+  function handleDeactivate(person: PersonnelRecord) {
+    setSelectedPerson(person);
     setIsDeleteDialogOpen(true);
   }
 
   async function confirmDeactivate() {
-    if (!selectedTechnician) return;
+    if (!selectedPerson) return;
 
     try {
-      const newActiveState = !selectedTechnician.is_active;
-
-      // Update technician
-      const { error: techError } = await supabase
-        .from('technicians')
-        .update({ is_active: newActiveState })
-        .eq('id', selectedTechnician.id);
-
-      if (techError) throw techError;
+      const newActiveState = !selectedPerson.is_active;
 
       // Update profile
       const { error: profileError } = await supabase
         .from('profiles')
         .update({ is_active: newActiveState })
-        .eq('id', selectedTechnician.profile_id);
+        .eq('id', selectedPerson.id);
 
       if (profileError) throw profileError;
 
-      await loadTechnicians();
+      // Update technician if exists
+      if (selectedPerson.technician) {
+        const { error: techError } = await supabase
+          .from('technicians')
+          .update({ is_active: newActiveState })
+          .eq('id', selectedPerson.technician.id);
+
+        if (techError) throw techError;
+      }
+
+      await loadPersonnel();
     } catch (err: any) {
       alert('Error: ' + err.message);
+    }
+  }
+
+  function getRoleLabel(role: string): string {
+    switch (role) {
+      case UserRole.SUPER_ADMIN:
+        return 'Super Admin';
+      case UserRole.ADMIN:
+        return 'Admin';
+      case UserRole.SUPPORT:
+        return 'Soporte';
+      case UserRole.TECHNICIAN:
+        return 'Técnico';
+      default:
+        return role;
     }
   }
 
@@ -132,7 +166,7 @@ export default function TechniciansPage() {
   return (
     <ProtectedLayout>
       <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-4">Técnicos</h1>
+        <h1 className="text-3xl font-bold mb-4">Personal</h1>
 
         <div className="flex flex-col sm:flex-row gap-4 mb-4">
           <input
@@ -151,7 +185,7 @@ export default function TechniciansPage() {
         </div>
 
         <div className="flex gap-2">
-          {(['active', 'inactive', 'all'] as TechnicianFilter[]).map(f => (
+          {(['active', 'inactive', 'all'] as PersonnelFilter[]).map(f => (
             <button
               key={f}
               onClick={() => setFilter(f)}
@@ -173,9 +207,9 @@ export default function TechniciansPage() {
         <div className="mb-4 p-4 bg-red-50 text-red-600 rounded-md">{error}</div>
       )}
 
-      {filteredTechnicians.length === 0 ? (
+      {filteredPersonnel.length === 0 ? (
         <div className="text-center py-12 text-gray-500">
-          No se encontraron técnicos
+          No se encontró personal
         </div>
       ) : (
         <div className="bg-white rounded-lg shadow overflow-hidden">
@@ -192,6 +226,9 @@ export default function TechniciansPage() {
                   Teléfono
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  Rol
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                   Zona
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
@@ -206,52 +243,55 @@ export default function TechniciansPage() {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {filteredTechnicians.map(technician => (
-                <tr key={technician.id}>
+              {filteredPersonnel.map(person => (
+                <tr key={person.id}>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    {technician.profile?.full_name}
+                    {person.full_name}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    {technician.profile?.email || '-'}
+                    {person.email || '-'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    {technician.profile?.phone || '-'}
+                    {person.phone || '-'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    {technician.zone || '-'}
+                    <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800">
+                      {getRoleLabel(person.role)}
+                    </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    {technician.vehicle || '-'}
+                    {person.technician?.zone || '-'}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    {person.technician?.vehicle || '-'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span
                       className={`px-2 py-1 rounded-full text-xs ${
-                        technician.is_active && technician.profile?.is_active
+                        person.is_active
                           ? 'bg-green-100 text-green-800'
                           : 'bg-gray-100 text-gray-800'
                       }`}
                     >
-                      {technician.is_active && technician.profile?.is_active
-                        ? 'Activo'
-                        : 'Inactivo'}
+                      {person.is_active ? 'Activo' : 'Inactivo'}
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
                     <button
-                      onClick={() => handleEdit(technician)}
+                      onClick={() => handleEdit(person)}
                       className="text-blue-600 hover:text-blue-900"
                     >
                       Editar
                     </button>
                     <button
-                      onClick={() => handleDeactivate(technician)}
+                      onClick={() => handleDeactivate(person)}
                       className={
-                        technician.is_active
+                        person.is_active
                           ? 'text-red-600 hover:text-red-900'
                           : 'text-green-600 hover:text-green-900'
                       }
                     >
-                      {technician.is_active ? 'Desactivar' : 'Reactivar'}
+                      {person.is_active ? 'Desactivar' : 'Reactivar'}
                     </button>
                   </td>
                 </tr>
@@ -266,18 +306,18 @@ export default function TechniciansPage() {
         onClose={() => setIsCreateModalOpen(false)}
         onSuccess={() => {
           setIsCreateModalOpen(false);
-          loadTechnicians();
+          loadPersonnel();
         }}
       />
 
-      <EditTechnicianModal
+      <EditPersonnelModal
         isOpen={isEditModalOpen}
         onClose={() => setIsEditModalOpen(false)}
         onSuccess={() => {
           setIsEditModalOpen(false);
-          loadTechnicians();
+          loadPersonnel();
         }}
-        technician={selectedTechnician}
+        person={selectedPerson}
       />
 
       <ConfirmDialog
@@ -285,17 +325,17 @@ export default function TechniciansPage() {
         onClose={() => setIsDeleteDialogOpen(false)}
         onConfirm={confirmDeactivate}
         title={
-          selectedTechnician?.is_active
-            ? 'Desactivar técnico'
-            : 'Reactivar técnico'
+          selectedPerson?.is_active
+            ? 'Desactivar personal'
+            : 'Reactivar personal'
         }
         message={
-          selectedTechnician?.is_active
-            ? `¿Desactivar al técnico "${selectedTechnician?.profile?.full_name}"? No podrá acceder a la aplicación.`
-            : `¿Reactivar al técnico "${selectedTechnician?.profile?.full_name}"?`
+          selectedPerson?.is_active
+            ? `¿Desactivar a "${selectedPerson?.full_name}"? No podrá acceder a la aplicación.`
+            : `¿Reactivar a "${selectedPerson?.full_name}"?`
         }
-        confirmText={selectedTechnician?.is_active ? 'Desactivar' : 'Reactivar'}
-        isDestructive={selectedTechnician?.is_active}
+        confirmText={selectedPerson?.is_active ? 'Desactivar' : 'Reactivar'}
+        isDestructive={selectedPerson?.is_active}
       />
     </ProtectedLayout>
   );
@@ -601,19 +641,19 @@ function CreateTechnicianModal({ isOpen, onClose, onSuccess }: CreateTechnicianM
   );
 }
 
-interface EditTechnicianModalProps {
+interface EditPersonnelModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
-  technician: TechnicianWithProfile | null;
+  person: PersonnelRecord | null;
 }
 
-function EditTechnicianModal({
+function EditPersonnelModal({
   isOpen,
   onClose,
   onSuccess,
-  technician,
-}: EditTechnicianModalProps) {
+  person,
+}: EditPersonnelModalProps) {
   const [formData, setFormData] = useState({
     full_name: '',
     phone: '',
@@ -624,22 +664,22 @@ function EditTechnicianModal({
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (technician) {
+    if (person) {
       setFormData({
-        full_name: technician.profile?.full_name || '',
-        phone: technician.profile?.phone || '',
-        zone: technician.zone || '',
-        vehicle: technician.vehicle || '',
+        full_name: person.full_name || '',
+        phone: person.phone || '',
+        zone: person.technician?.zone || '',
+        vehicle: person.technician?.vehicle || '',
       });
     }
     setError('');
-  }, [technician, isOpen]);
+  }, [person, isOpen]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
 
-    if (!technician) return;
+    if (!person) return;
 
     if (!formData.full_name.trim()) {
       setError('El nombre es obligatorio');
@@ -656,20 +696,22 @@ function EditTechnicianModal({
           full_name: formData.full_name.trim(),
           phone: formData.phone.trim() || null,
         })
-        .eq('id', technician.profile_id);
+        .eq('id', person.id);
 
       if (profileError) throw profileError;
 
-      // Update technician
-      const { error: techError } = await supabase
-        .from('technicians')
-        .update({
-          zone: formData.zone.trim() || null,
-          vehicle: formData.vehicle.trim() || null,
-        })
-        .eq('id', technician.id);
+      // Update technician if exists
+      if (person.technician) {
+        const { error: techError } = await supabase
+          .from('technicians')
+          .update({
+            zone: formData.zone.trim() || null,
+            vehicle: formData.vehicle.trim() || null,
+          })
+          .eq('id', person.technician.id);
 
-      if (techError) throw techError;
+        if (techError) throw techError;
+      }
 
       onSuccess();
     } catch (err: any) {
@@ -679,8 +721,10 @@ function EditTechnicianModal({
     }
   }
 
+  const isTechnician = person?.role === UserRole.TECHNICIAN;
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Editar técnico">
+    <Modal isOpen={isOpen} onClose={onClose} title="Editar personal">
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && (
           <div className="p-3 bg-red-50 text-red-600 rounded-md text-sm">{error}</div>
@@ -709,25 +753,29 @@ function EditTechnicianModal({
           />
         </div>
 
-        <div>
-          <label className="block text-sm font-medium mb-1">Zona</label>
-          <input
-            type="text"
-            value={formData.zone}
-            onChange={e => setFormData({ ...formData, zone: e.target.value })}
-            className="w-full px-3 py-2 border rounded-md"
-          />
-        </div>
+        {isTechnician && (
+          <>
+            <div>
+              <label className="block text-sm font-medium mb-1">Zona</label>
+              <input
+                type="text"
+                value={formData.zone}
+                onChange={e => setFormData({ ...formData, zone: e.target.value })}
+                className="w-full px-3 py-2 border rounded-md"
+              />
+            </div>
 
-        <div>
-          <label className="block text-sm font-medium mb-1">Vehículo</label>
-          <input
-            type="text"
-            value={formData.vehicle}
-            onChange={e => setFormData({ ...formData, vehicle: e.target.value })}
-            className="w-full px-3 py-2 border rounded-md"
-          />
-        </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Vehículo</label>
+              <input
+                type="text"
+                value={formData.vehicle}
+                onChange={e => setFormData({ ...formData, vehicle: e.target.value })}
+                className="w-full px-3 py-2 border rounded-md"
+              />
+            </div>
+          </>
+        )}
 
         <div className="flex gap-3 justify-end pt-4">
           <button
