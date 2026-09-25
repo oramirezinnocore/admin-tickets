@@ -1,0 +1,6 @@
+# Ignore local android build artifacts
+# Force EAS to regenerate from app.json and assets/
+android/
+
+# Ignore iOS build artifacts
+ios/
