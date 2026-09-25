@@ -91,6 +91,7 @@ function Header() {
     { href: '/clients', label: 'Clientes' },
     { href: '/technicians', label: 'Personal' },
     { href: '/map', label: 'Mapa' },
+    { href: '/reports', label: 'Reportes' },
   ];
 
   // Add Administrators link only for SUPER_ADMIN
