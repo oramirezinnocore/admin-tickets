@@ -15,21 +15,9 @@ BEGIN
   END IF;
 END$$;
 
--- Update is_admin_or_super to include SUPPORT for operational tasks
-DROP FUNCTION IF EXISTS is_admin_or_super();
-CREATE OR REPLACE FUNCTION is_admin_or_super()
-RETURNS boolean
-LANGUAGE plpgsql
-SECURITY DEFINER
-STABLE
-AS $$
-DECLARE
-  role_value user_role;
-BEGIN
-  role_value := current_user_role();
-  RETURN role_value = 'ADMIN' OR role_value = 'SUPER_ADMIN';
-END;
-$$;
+-- NOTE: is_admin_or_super() remains unchanged (ADMIN OR SUPER_ADMIN only)
+-- SUPPORT receives explicit limited policies below for required operational access
+-- DO NOT add SUPPORT to is_admin_or_super() - many policies depend on it for admin privileges
 
 -- Create helper function to check if user can access back office
 CREATE OR REPLACE FUNCTION can_access_back_office()
@@ -132,7 +120,7 @@ CREATE POLICY "SUPPORT can view all locations"
   USING (current_user_role() = 'SUPPORT');
 
 -- Update close_ticket_with_validation to allow SUPPORT
-DROP FUNCTION IF EXISTS close_ticket_with_validation(uuid, text);
+-- Using CREATE OR REPLACE (no DROP needed - function signature unchanged)
 CREATE OR REPLACE FUNCTION close_ticket_with_validation(
   p_ticket_id uuid,
   p_solution_text text
