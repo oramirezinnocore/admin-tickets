@@ -61,6 +61,7 @@ export default function TicketDetailScreen() {
   const [newNote, setNewNote] = useState('');
   const [addingNote, setAddingNote] = useState(false);
   const [solutionText, setSolutionText] = useState('');
+  const solutionTextRef = useRef(''); // Track unsaved changes
 
   const [showActivitySheet, setShowActivitySheet] = useState(false);
   const [showSignatureModal, setShowSignatureModal] = useState(false);
@@ -93,7 +94,13 @@ export default function TicketDetailScreen() {
 
       if (error) throw error;
       setTicket(ticketData as any);
-      setSolutionText(ticketData.solution_text || '');
+
+      // Only reset solutionText if we don't have unsaved changes
+      if (solutionTextRef.current === (ticketData.solution_text || '')) {
+        setSolutionText(ticketData.solution_text || '');
+        solutionTextRef.current = ticketData.solution_text || '';
+      }
+
       setSignedByName(ticketData.client?.name || '');
 
       // Load evidences
@@ -127,18 +134,10 @@ export default function TicketDetailScreen() {
     try {
       setSaving(true);
 
-      const updates: any = {
-        status: 'IN_REVIEW',
-      };
-
-      // Only set started_at if not already set
-      if (!ticket.started_at) {
-        updates.started_at = new Date().toISOString();
-      }
-
+      // Status change to IN_REVIEW - started_at will be set automatically by database trigger
       const { error } = await supabase
         .from('tickets')
-        .update(updates)
+        .update({ status: 'IN_REVIEW' })
         .eq('id', ticketId);
 
       if (error) throw error;
@@ -176,6 +175,27 @@ export default function TicketDetailScreen() {
       Alert.alert('Error', error.message || 'No se pudo agregar la observación');
     } finally {
       setAddingNote(false);
+    }
+  }
+
+  async function saveSolutionDraft() {
+    if (!ticket) return;
+
+    const trimmed = solutionText.trim();
+
+    try {
+      const { error } = await supabase
+        .from('tickets')
+        .update({ solution_text: trimmed || null })
+        .eq('id', ticketId);
+
+      if (error) throw error;
+
+      // Update ref to match saved state
+      solutionTextRef.current = trimmed;
+    } catch (error: any) {
+      console.error('Error saving solution draft:', error);
+      // Don't show alert, this is a background save
     }
   }
 
@@ -254,6 +274,9 @@ export default function TicketDetailScreen() {
   }
 
   async function handleTakePhoto() {
+    // Save solution draft before navigating
+    await saveSolutionDraft();
+
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('Permiso denegado', 'Se necesita acceso a la cámara');
@@ -271,6 +294,9 @@ export default function TicketDetailScreen() {
   }
 
   async function handlePickImage() {
+    // Save solution draft before navigating
+    await saveSolutionDraft();
+
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('Permiso denegado', 'Se necesita acceso a las fotos');
@@ -359,6 +385,9 @@ export default function TicketDetailScreen() {
   }
 
   async function handleCaptureSignature() {
+    // Save solution draft before opening signature modal
+    await saveSolutionDraft();
+
     // If signature already exists, confirm replacement
     if (signature) {
       Alert.alert(
@@ -479,13 +508,16 @@ export default function TicketDetailScreen() {
   async function handleCloseTicket() {
     if (!ticket) return;
 
-    // Validate
+    // Client-side validation (quick feedback)
     const errors: string[] = [];
+    if (!ticket.started_at) {
+      errors.push('Debes iniciar la atención antes de cerrar');
+    }
     if (!solutionText.trim()) {
       errors.push('Captura la solución realizada');
     }
     if (evidences.length === 0) {
-      errors.push('Agrega al menos una evidencia');
+      errors.push('Agrega al menos una fotografía de evidencia');
     }
     if (!signature) {
       errors.push('Obtén la firma del cliente');
@@ -493,7 +525,7 @@ export default function TicketDetailScreen() {
 
     if (errors.length > 0) {
       Alert.alert(
-        'Faltan datos',
+        'Faltan datos requeridos',
         errors.map(e => `• ${e}`).join('\n')
       );
       return;
@@ -510,16 +542,22 @@ export default function TicketDetailScreen() {
             try {
               setSaving(true);
 
-              const { error } = await supabase
-                .from('tickets')
-                .update({
-                  status: 'RESOLVED',
-                  closed_at: new Date().toISOString(),
-                  solution_text: solutionText.trim(),
-                })
-                .eq('id', ticketId);
+              // Use server-side validation RPC
+              const { data, error } = await supabase.rpc('close_ticket_with_validation', {
+                p_ticket_id: ticketId,
+                p_solution_text: solutionText.trim(),
+              });
 
               if (error) throw error;
+
+              if (!data.success) {
+                // Server-side validation failed
+                const errorMsg = data.details
+                  ? (data.details as string[]).map(e => `• ${e}`).join('\n')
+                  : data.error;
+                Alert.alert('No se puede cerrar el ticket', errorMsg);
+                return;
+              }
 
               await loadTicket();
               Alert.alert('Éxito', 'Ticket cerrado exitosamente', [
@@ -529,7 +567,7 @@ export default function TicketDetailScreen() {
                 },
               ]);
             } catch (error: any) {
-              Alert.alert('Error', error.message);
+              Alert.alert('Error', error.message || 'No se pudo cerrar el ticket');
             } finally {
               setSaving(false);
             }
@@ -577,10 +615,12 @@ export default function TicketDetailScreen() {
   const isResolved = ticket?.status === 'RESOLVED';
   const isCancelled = ticket?.status === 'CANCELLED';
   const isReadOnly = isResolved || isCancelled;
+  const hasStarted = ticket?.started_at != null;
   const canStart = ticket?.status === 'ASSIGNED' || ticket?.status === 'PENDING';
   const canPause = ticket?.status === 'IN_REVIEW' || ticket?.status === 'ASSIGNED';
   const canResume = ticket?.status === 'PAUSED';
   const canClose = ticket?.status === 'ASSIGNED' || ticket?.status === 'IN_REVIEW' || ticket?.status === 'PAUSED';
+  const showAddNote = !isReadOnly && !hasStarted; // Only show before starting attention
 
   if (loading) {
     return (
@@ -640,9 +680,16 @@ export default function TicketDetailScreen() {
         {ticket.client?.phone && (
           <Text style={styles.textSmall}>Tel: {ticket.client.phone}</Text>
         )}
-        <TouchableOpacity style={styles.linkButton} onPress={openMaps}>
-          <Text style={styles.linkButtonText}>Cómo llegar →</Text>
-        </TouchableOpacity>
+        {hasStarted && (
+          <TouchableOpacity style={styles.linkButton} onPress={openMaps}>
+            <Text style={styles.linkButtonText}>Cómo llegar →</Text>
+          </TouchableOpacity>
+        )}
+        {!hasStarted && (
+          <Text style={[styles.textSmall, { color: '#9CA3AF', marginTop: 8 }]}>
+            📍 La navegación estará disponible al iniciar la atención
+          </Text>
+        )}
       </View>
 
       <View style={styles.section}>
@@ -665,8 +712,8 @@ export default function TicketDetailScreen() {
         </View>
       )}
 
-      {/* Add Note Section */}
-      {!isReadOnly && (
+      {/* Add Note Section - only visible before starting attention */}
+      {showAddNote && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Agregar actualización</Text>
           <TextInput
@@ -695,7 +742,10 @@ export default function TicketDetailScreen() {
           style={styles.textArea}
           multiline
           value={solutionText}
-          onChangeText={setSolutionText}
+          onChangeText={(text) => {
+            setSolutionText(text);
+            solutionTextRef.current = text;
+          }}
           placeholder="Describe la solución..."
           editable={!isReadOnly}
         />
