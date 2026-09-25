@@ -167,9 +167,8 @@ $$;
 GRANT EXECUTE ON FUNCTION commit_client_import(text) TO authenticated;
 
 -- Update comments
-COMMENT ON FUNCTION commit_client_import IS
-  'Atomically commits a staged client import. Uses auth.uid() for caller identity. ' ||
-  'Locks job row to prevent concurrent commits. SUPER_ADMIN only.';
+COMMENT ON FUNCTION commit_client_import(text) IS
+  'Atomically commits a staged client import. Uses auth.uid() for caller identity. Locks job row to prevent concurrent commits. SUPER_ADMIN only.';
 
 COMMENT ON COLUMN client_import_jobs.content_hash IS
   'SHA-256 hash of validated CSV content. Used to detect import_id reuse with different data.';
