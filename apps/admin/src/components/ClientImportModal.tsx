@@ -52,6 +52,7 @@ export default function ClientImportModal({
   const [validationResult, setValidationResult] = useState<ValidationResponse | null>(null);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [importId, setImportId] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function handleClose() {
@@ -123,6 +124,9 @@ export default function ClientImportModal({
       }
 
       setValidationResult(data);
+      // Generate unique import ID for idempotency and atomicity
+      const newImportId = `import_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+      setImportId(newImportId);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -131,7 +135,7 @@ export default function ClientImportModal({
   }
 
   async function handleImport() {
-    if (!validationResult || !validationResult.canImport) return;
+    if (!validationResult || !validationResult.canImport || !importId) return;
 
     setImporting(true);
     setError('');
@@ -145,6 +149,7 @@ export default function ClientImportModal({
         },
         body: JSON.stringify({
           action: 'import',
+          importId,
           validatedRows: validationResult.results.filter(r => r.isValid),
         }),
       });

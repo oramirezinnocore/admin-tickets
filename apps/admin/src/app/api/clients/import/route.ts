@@ -5,7 +5,8 @@ import { hasValidCoordinates } from '@wisper/shared';
 
 const IMPORT_LIMIT = 10000;
 const GEOCODE_BATCH_SIZE = 5; // Max concurrent geocoding requests
-const DB_BATCH_SIZE = 500; // Database insert batch size
+const GEOCODE_LIMIT = 500; // Max addresses to geocode synchronously
+const STAGING_BATCH_SIZE = 500; // Staging insert batch size
 
 interface ImportRow {
   name: string;
@@ -301,14 +302,17 @@ export async function POST(request: NextRequest) {
 
     // Parse request body
     const body = await request.json();
-    const { action, csvContent, validatedRows } = body;
+    const { action, csvContent, validatedRows, importId } = body;
 
     if (action === 'validate') {
       // PHASE 1: Validate CSV content
       return await handleValidation(csvContent);
     } else if (action === 'import') {
-      // PHASE 2: Import validated rows
-      return await handleImport(supabase, validatedRows);
+      // PHASE 2: Import validated rows atomically
+      if (!importId || typeof importId !== 'string') {
+        return NextResponse.json({ error: 'Import ID requerido' }, { status: 400 });
+      }
+      return await handleAtomicImport(supabase, user.id, importId, validatedRows);
     } else {
       return NextResponse.json({ error: 'Acción inválida' }, { status: 400 });
     }
@@ -468,6 +472,18 @@ async function handleValidation(csvContent: string) {
 
   // PHASE 2: Geocode addresses for rows without coordinates
   if (rowsNeedingGeocode.length > 0) {
+    // Check geocoding limit for production safety
+    if (rowsNeedingGeocode.length > GEOCODE_LIMIT) {
+      return NextResponse.json(
+        {
+          error: `Demasiadas direcciones requieren geocodificación: ${rowsNeedingGeocode.length}`,
+          details: `El límite es ${GEOCODE_LIMIT} direcciones sin coordenadas. Por favor proporciona coordenadas (decimales o DMS) en el CSV para importaciones grandes.`,
+          suggestion: 'Puedes dividir el archivo en lotes más pequeños o proporcionar coordenadas para los ${rowsNeedingGeocode.length} clientes.',
+        },
+        { status: 400 }
+      );
+    }
+
     console.log(`[Import] Geocoding ${rowsNeedingGeocode.length} addresses...`);
 
     const geocodeResults = await processBatch(
@@ -524,8 +540,10 @@ async function handleValidation(csvContent: string) {
   });
 }
 
-async function handleImport(
+async function handleAtomicImport(
   supabase: SupabaseClient,
+  userId: string,
+  importId: string,
   validatedRows: ValidationResult[]
 ) {
   if (!Array.isArray(validatedRows) || validatedRows.length === 0) {
@@ -544,8 +562,8 @@ async function handleImport(
     );
   }
 
-  // Prepare clients for insertion
-  const clientsToInsert = validatedRows.map(result => {
+  // Prepare clients for staging
+  const clientsToStage = validatedRows.map(result => {
     const row = result.data;
     const lat = row.latitude ? parseFloat(row.latitude) : null;
     const lng = row.longitude ? parseFloat(row.longitude) : null;
@@ -564,6 +582,7 @@ async function handleImport(
     }
 
     return {
+      import_id: importId,
       name: row.name.trim(),
       address: row.address.trim(),
       phone: row.phone?.trim() || null,
@@ -571,46 +590,123 @@ async function handleImport(
       latitude: lat,
       longitude: lng,
       is_active: true,
+      created_at: new Date().toISOString(),
     };
   });
 
-  // Batch insert in chunks to handle large imports efficiently
-  const allInsertedClients: any[] = [];
-  const totalBatches = Math.ceil(clientsToInsert.length / DB_BATCH_SIZE);
+  console.log(`[Import] Starting atomic import ${importId} with ${clientsToStage.length} clients`);
 
-  console.log(
-    `[Import] Inserting ${clientsToInsert.length} clients in ${totalBatches} batch(es) of ${DB_BATCH_SIZE}`
-  );
+  try {
+    // Step 1: Create import job for tracking and idempotency
+    const { error: jobError } = await supabase.from('client_import_jobs').insert({
+      import_id: importId,
+      user_id: userId,
+      status: 'pending',
+      total_records: clientsToStage.length,
+    });
 
-  for (let i = 0; i < clientsToInsert.length; i += DB_BATCH_SIZE) {
-    const batch = clientsToInsert.slice(i, i + DB_BATCH_SIZE);
-    const batchNumber = Math.floor(i / DB_BATCH_SIZE) + 1;
+    if (jobError) {
+      // Check if it's a duplicate key error (job already exists)
+      if (jobError.code === '23505') {
+        // Job already exists - check its status
+        const { data: existingJob } = await supabase
+          .from('client_import_jobs')
+          .select('status, imported_records, error_message')
+          .eq('import_id', importId)
+          .single();
 
-    console.log(`[Import] Processing batch ${batchNumber}/${totalBatches} (${batch.length} records)`);
+        if (existingJob?.status === 'committed') {
+          // Already successfully imported - idempotency
+          console.log(`[Import] Import ${importId} already completed (idempotent)`);
+          return NextResponse.json({
+            success: true,
+            imported: existingJob.imported_records,
+            message: 'Importación ya completada previamente',
+            idempotent: true,
+          });
+        }
 
-    const { data, error } = await supabase.from('clients').insert(batch).select();
-
-    if (error) {
-      console.error(`[Import] Database error in batch ${batchNumber}:`, error);
-      return NextResponse.json(
-        {
-          error: `Error al insertar clientes en la base de datos (batch ${batchNumber}/${totalBatches})`,
-          details: error.message,
-        },
-        { status: 500 }
-      );
+        // If failed or staging, allow retry by continuing
+        console.log(`[Import] Retrying import ${importId} (previous status: ${existingJob?.status})`);
+      } else {
+        throw jobError;
+      }
     }
 
-    if (data) {
-      allInsertedClients.push(...data);
+    // Step 2: Stage all records in batches
+    const totalBatches = Math.ceil(clientsToStage.length / STAGING_BATCH_SIZE);
+    console.log(`[Import] Staging ${clientsToStage.length} clients in ${totalBatches} batch(es)`);
+
+    for (let i = 0; i < clientsToStage.length; i += STAGING_BATCH_SIZE) {
+      const batch = clientsToStage.slice(i, i + STAGING_BATCH_SIZE);
+      const batchNumber = Math.floor(i / STAGING_BATCH_SIZE) + 1;
+
+      console.log(`[Import] Staging batch ${batchNumber}/${totalBatches} (${batch.length} records)`);
+
+      const { error: stagingError } = await supabase
+        .from('client_import_staging')
+        .insert(batch);
+
+      if (stagingError) {
+        console.error(`[Import] Staging error in batch ${batchNumber}:`, stagingError);
+        throw new Error(
+          `Error al preparar registros para importación (batch ${batchNumber}): ${stagingError.message}`
+        );
+      }
     }
+
+    // Update job status to staging complete
+    await supabase
+      .from('client_import_jobs')
+      .update({ status: 'staging' })
+      .eq('import_id', importId);
+
+    console.log(`[Import] All records staged, calling atomic commit function`);
+
+    // Step 3: Commit atomically using database function
+    const { data: commitResult, error: commitError } = await supabase.rpc(
+      'commit_client_import',
+      {
+        p_import_id: importId,
+        p_user_id: userId,
+      }
+    );
+
+    if (commitError) {
+      console.error(`[Import] Atomic commit failed:`, commitError);
+      throw new Error(`Error al ejecutar importación atómica: ${commitError.message}`);
+    }
+
+    console.log(`[Import] Atomic import ${importId} completed:`, commitResult);
+
+    return NextResponse.json({
+      success: true,
+      imported: commitResult.imported,
+      message: commitResult.message || 'Importación completada exitosamente',
+      idempotent: commitResult.idempotent || false,
+    });
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+    console.error(`[Import] Import ${importId} failed:`, error);
+
+    // Update job status to failed
+    await supabase
+      .from('client_import_jobs')
+      .update({
+        status: 'failed',
+        error_message: errorMessage,
+        completed_at: new Date().toISOString(),
+      })
+      .eq('import_id', importId);
+
+    return NextResponse.json(
+      {
+        error: 'Error al importar clientes',
+        details: errorMessage,
+        importId,
+        retryable: true,
+      },
+      { status: 500 }
+    );
   }
-
-  console.log(`[Import] Successfully inserted ${allInsertedClients.length} clients`);
-
-  return NextResponse.json({
-    success: true,
-    imported: allInsertedClients.length,
-    clients: allInsertedClients,
-  });
 }
