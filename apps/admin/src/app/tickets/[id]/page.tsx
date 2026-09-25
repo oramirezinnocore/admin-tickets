@@ -21,6 +21,9 @@ import {
   formatTicketAge,
   formatTicketFolio,
   hasValidCoordinates,
+  formatTimeToAttention,
+  formatAttentionTime,
+  formatTotalTicketTime,
 } from '@wisper/shared';
 import TicketActivityTimeline from '@/components/TicketActivity';
 
@@ -595,6 +598,27 @@ export default function TicketDetailPage() {
               <div className="text-center">
                 <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Antigüedad total</dt>
                 <dd className="text-2xl font-bold text-gray-900">{formatTicketAge(ticket.created_at)}</dd>
+              </div>
+
+              {/* Service Time Metrics */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-gray-200">
+                <div className="text-center">
+                  <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Tiempo hasta atención</dt>
+                  <dd className="text-lg font-semibold text-gray-900">{formatTimeToAttention(ticket.created_at, ticket.started_at)}</dd>
+                  <p className="text-xs text-gray-500 mt-1">Creación → Inicio</p>
+                </div>
+
+                <div className="text-center">
+                  <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Tiempo de atención</dt>
+                  <dd className="text-lg font-semibold text-gray-900">{formatAttentionTime(ticket.started_at, ticket.closed_at)}</dd>
+                  <p className="text-xs text-gray-500 mt-1">Inicio → Cierre</p>
+                </div>
+
+                <div className="text-center">
+                  <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Tiempo total del ticket</dt>
+                  <dd className="text-lg font-semibold text-gray-900">{formatTotalTicketTime(ticket.created_at, ticket.closed_at)}</dd>
+                  <p className="text-xs text-gray-500 mt-1">Creación → Cierre</p>
+                </div>
               </div>
 
               <div className="relative">

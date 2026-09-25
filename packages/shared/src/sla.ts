@@ -69,3 +69,101 @@ export function getSlaOrderPriority(slaState: TicketSlaState): number {
       return 999;
   }
 }
+
+/**
+ * Format duration in HH:mm:ss format
+ * Correctly handles durations > 24 hours (no wrapping)
+ * @param startTime - Start timestamp (string or Date)
+ * @param endTime - End timestamp (string or Date)
+ * @returns Formatted duration string (e.g., "02:30:45", "49:15:22")
+ */
+export function formatDuration(
+  startTime: string | Date | null | undefined,
+  endTime: string | Date | null | undefined
+): string {
+  if (!startTime || !endTime) {
+    return 'No disponible';
+  }
+
+  const start = typeof startTime === 'string' ? new Date(startTime) : startTime;
+  const end = typeof endTime === 'string' ? new Date(endTime) : endTime;
+
+  // Calculate total elapsed milliseconds
+  const diffMs = end.getTime() - start.getTime();
+
+  if (diffMs < 0) {
+    return 'No disponible';
+  }
+
+  // Calculate hours, minutes, seconds
+  const totalSeconds = Math.floor(diffMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  // Format as HH:mm:ss (no 24-hour wrapping)
+  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Calculate time from ticket creation to attention start
+ * @param createdAt - Ticket creation timestamp
+ * @param startedAt - Attention start timestamp
+ * @returns Formatted duration or status message
+ */
+export function formatTimeToAttention(
+  createdAt: string | Date | null | undefined,
+  startedAt: string | Date | null | undefined
+): string {
+  if (!createdAt) {
+    return 'No disponible';
+  }
+
+  if (!startedAt) {
+    return 'Pendiente';
+  }
+
+  return formatDuration(createdAt, startedAt);
+}
+
+/**
+ * Calculate time from attention start to ticket closure
+ * @param startedAt - Attention start timestamp
+ * @param closedAt - Ticket closure timestamp
+ * @returns Formatted duration or status message
+ */
+export function formatAttentionTime(
+  startedAt: string | Date | null | undefined,
+  closedAt: string | Date | null | undefined
+): string {
+  if (!startedAt) {
+    return 'Pendiente';
+  }
+
+  if (!closedAt) {
+    return 'En curso';
+  }
+
+  return formatDuration(startedAt, closedAt);
+}
+
+/**
+ * Calculate total ticket lifecycle time
+ * @param createdAt - Ticket creation timestamp
+ * @param closedAt - Ticket closure timestamp (if null, calculates to current time)
+ * @returns Formatted duration or status message
+ */
+export function formatTotalTicketTime(
+  createdAt: string | Date | null | undefined,
+  closedAt: string | Date | null | undefined
+): string {
+  if (!createdAt) {
+    return 'No disponible';
+  }
+
+  if (!closedAt) {
+    return 'En curso';
+  }
+
+  return formatDuration(createdAt, closedAt);
+}
