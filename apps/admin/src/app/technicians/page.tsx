@@ -6,6 +6,7 @@ import Modal from '@/components/ui/Modal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { supabase } from '@/lib/supabase';
 import { Profile, Technician, UserRole } from '@wisper/shared';
+import { useAuth } from '@/lib/auth-context';
 
 interface PersonnelRecord extends Profile {
   technician?: Technician | null;
@@ -14,6 +15,7 @@ interface PersonnelRecord extends Profile {
 type PersonnelFilter = 'active' | 'inactive' | 'all';
 
 export default function PersonnelPage() {
+  const { profile: currentUserProfile } = useAuth();
   const [personnel, setPersonnel] = useState<PersonnelRecord[]>([]);
   const [filteredPersonnel, setFilteredPersonnel] = useState<PersonnelRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,6 +26,12 @@ export default function PersonnelPage() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [selectedPerson, setSelectedPerson] = useState<PersonnelRecord | null>(null);
   const [error, setError] = useState('');
+
+  // Check if current user can manage personnel
+  const canManagePersonnel = currentUserProfile?.role === UserRole.SUPER_ADMIN ||
+                             currentUserProfile?.role === UserRole.ADMIN;
+
+  const isReadOnly = !canManagePersonnel;
 
   useEffect(() => {
     loadPersonnel();
@@ -37,12 +45,18 @@ export default function PersonnelPage() {
     try {
       setLoading(true);
 
-      // Load all profiles (ADMIN, SUPPORT, TECHNICIAN) with left-joined technician data
-      const { data: profiles, error: profilesError } = await supabase
+      // Load profiles (exclude SUPER_ADMIN for SUPPORT users)
+      let query = supabase
         .from('profiles')
         .select('*')
-        .in('role', ['ADMIN', 'SUPPORT', 'TECHNICIAN'])
-        .order('created_at', { ascending: false });
+        .in('role', ['ADMIN', 'SUPPORT', 'TECHNICIAN']);
+
+      // SUPPORT can see operational personnel only
+      if (currentUserProfile?.role === UserRole.SUPPORT) {
+        query = query.in('role', ['SUPPORT', 'TECHNICIAN']);
+      }
+
+      const { data: profiles, error: profilesError } = await query.order('created_at', { ascending: false });
 
       if (profilesError) throw profilesError;
 
@@ -176,12 +190,14 @@ export default function PersonnelPage() {
             onChange={e => setSearchQuery(e.target.value)}
             className="flex-1 px-4 py-2 border rounded-md"
           />
-          <button
-            onClick={handleCreate}
-            className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
-          >
-            Nuevo técnico
-          </button>
+          {canManagePersonnel && (
+            <button
+              onClick={handleCreate}
+              className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+            >
+              Agregar personal
+            </button>
+          )}
         </div>
 
         <div className="flex gap-2">
@@ -237,9 +253,11 @@ export default function PersonnelPage() {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                   Estado
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                  Acciones
-                </th>
+                {canManagePersonnel && (
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                    Acciones
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
@@ -276,24 +294,26 @@ export default function PersonnelPage() {
                       {person.is_active ? 'Activo' : 'Inactivo'}
                     </span>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
-                    <button
-                      onClick={() => handleEdit(person)}
-                      className="text-blue-600 hover:text-blue-900"
-                    >
-                      Editar
-                    </button>
-                    <button
-                      onClick={() => handleDeactivate(person)}
-                      className={
-                        person.is_active
-                          ? 'text-red-600 hover:text-red-900'
-                          : 'text-green-600 hover:text-green-900'
-                      }
-                    >
-                      {person.is_active ? 'Desactivar' : 'Reactivar'}
-                    </button>
-                  </td>
+                  {canManagePersonnel && (
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
+                      <button
+                        onClick={() => handleEdit(person)}
+                        className="text-blue-600 hover:text-blue-900"
+                      >
+                        Editar
+                      </button>
+                      <button
+                        onClick={() => handleDeactivate(person)}
+                        className={
+                          person.is_active
+                            ? 'text-red-600 hover:text-red-900'
+                            : 'text-green-600 hover:text-green-900'
+                        }
+                      >
+                        {person.is_active ? 'Desactivar' : 'Reactivar'}
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -301,42 +321,48 @@ export default function PersonnelPage() {
         </div>
       )}
 
-      <CreateTechnicianModal
-        isOpen={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
-        onSuccess={() => {
-          setIsCreateModalOpen(false);
-          loadPersonnel();
-        }}
-      />
+      {canManagePersonnel && (
+        <>
+          <CreatePersonnelModal
+            isOpen={isCreateModalOpen}
+            onClose={() => setIsCreateModalOpen(false)}
+            onSuccess={() => {
+              setIsCreateModalOpen(false);
+              loadPersonnel();
+            }}
+            callerRole={currentUserProfile?.role}
+          />
 
-      <EditPersonnelModal
-        isOpen={isEditModalOpen}
-        onClose={() => setIsEditModalOpen(false)}
-        onSuccess={() => {
-          setIsEditModalOpen(false);
-          loadPersonnel();
-        }}
-        person={selectedPerson}
-      />
+          <EditPersonnelModal
+            isOpen={isEditModalOpen}
+            onClose={() => setIsEditModalOpen(false)}
+            onSuccess={() => {
+              setIsEditModalOpen(false);
+              loadPersonnel();
+            }}
+            person={selectedPerson}
+            callerRole={currentUserProfile?.role}
+          />
 
-      <ConfirmDialog
-        isOpen={isDeleteDialogOpen}
-        onClose={() => setIsDeleteDialogOpen(false)}
-        onConfirm={confirmDeactivate}
-        title={
-          selectedPerson?.is_active
-            ? 'Desactivar personal'
-            : 'Reactivar personal'
-        }
-        message={
-          selectedPerson?.is_active
-            ? `¿Desactivar a "${selectedPerson?.full_name}"? No podrá acceder a la aplicación.`
-            : `¿Reactivar a "${selectedPerson?.full_name}"?`
-        }
-        confirmText={selectedPerson?.is_active ? 'Desactivar' : 'Reactivar'}
-        isDestructive={selectedPerson?.is_active}
-      />
+          <ConfirmDialog
+            isOpen={isDeleteDialogOpen}
+            onClose={() => setIsDeleteDialogOpen(false)}
+            onConfirm={confirmDeactivate}
+            title={
+              selectedPerson?.is_active
+                ? 'Desactivar personal'
+                : 'Reactivar personal'
+            }
+            message={
+              selectedPerson?.is_active
+                ? `¿Desactivar a "${selectedPerson?.full_name}"? No podrá acceder a la aplicación.`
+                : `¿Reactivar a "${selectedPerson?.full_name}"?`
+            }
+            confirmText={selectedPerson?.is_active ? 'Desactivar' : 'Reactivar'}
+            isDestructive={selectedPerson?.is_active}
+          />
+        </>
+      )}
     </ProtectedLayout>
   );
 }
@@ -370,11 +396,9 @@ function CredentialsDisplay({ email, temporaryPassword, onClose }: CredentialsDi
         setShared(true);
         setTimeout(() => setShared(false), 2000);
       } catch (err) {
-        // User cancelled or error - fall back to copy
         handleCopy();
       }
     } else {
-      // Share API not available - fall back to copy
       handleCopy();
     }
   }
@@ -382,7 +406,7 @@ function CredentialsDisplay({ email, temporaryPassword, onClose }: CredentialsDi
   return (
     <div className="space-y-4">
       <div className="bg-green-50 p-4 rounded-md border border-green-200">
-        <p className="text-green-800 font-medium">El técnico fue creado correctamente</p>
+        <p className="text-green-800 font-medium">Personal creado correctamente</p>
       </div>
 
       <div className="bg-gray-50 p-4 rounded-md border border-gray-200">
@@ -405,7 +429,7 @@ function CredentialsDisplay({ email, temporaryPassword, onClose }: CredentialsDi
 
       <div className="bg-yellow-50 p-3 rounded-md border border-yellow-200">
         <p className="text-yellow-800 text-sm">
-          ⚠️ Esta contraseña solo se mostrará una vez. El técnico deberá cambiarla al iniciar sesión por primera vez.
+          ⚠️ Esta contraseña solo se mostrará una vez. El usuario deberá cambiarla al iniciar sesión por primera vez.
         </p>
       </div>
 
@@ -439,17 +463,19 @@ function CredentialsDisplay({ email, temporaryPassword, onClose }: CredentialsDi
   );
 }
 
-interface CreateTechnicianModalProps {
+interface CreatePersonnelModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  callerRole?: string;
 }
 
-function CreateTechnicianModal({ isOpen, onClose, onSuccess }: CreateTechnicianModalProps) {
+function CreatePersonnelModal({ isOpen, onClose, onSuccess, callerRole }: CreatePersonnelModalProps) {
   const [formData, setFormData] = useState({
     full_name: '',
     email: '',
     phone: '',
+    role: UserRole.TECHNICIAN,
     zone: '',
     vehicle: '',
   });
@@ -460,12 +486,18 @@ function CreateTechnicianModal({ isOpen, onClose, onSuccess }: CreateTechnicianM
     temporaryPassword: string;
   } | null>(null);
 
+  // Determine which roles the caller can create
+  const availableRoles = callerRole === UserRole.SUPER_ADMIN
+    ? [UserRole.ADMIN, UserRole.SUPPORT, UserRole.TECHNICIAN]
+    : [UserRole.SUPPORT, UserRole.TECHNICIAN]; // ADMIN can create SUPPORT and TECHNICIAN
+
   useEffect(() => {
     if (isOpen) {
       setFormData({
         full_name: '',
         email: '',
         phone: '',
+        role: availableRoles[0] || UserRole.TECHNICIAN,
         zone: '',
         vehicle: '',
       });
@@ -473,6 +505,8 @@ function CreateTechnicianModal({ isOpen, onClose, onSuccess }: CreateTechnicianM
       setCredentials(null);
     }
   }, [isOpen]);
+
+  const isTechnicianRole = formData.role === UserRole.TECHNICIAN;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -486,7 +520,6 @@ function CreateTechnicianModal({ isOpen, onClose, onSuccess }: CreateTechnicianM
     setSubmitting(true);
 
     try {
-      // Get current session token
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         setError('No hay sesión activa');
@@ -494,8 +527,7 @@ function CreateTechnicianModal({ isOpen, onClose, onSuccess }: CreateTechnicianM
         return;
       }
 
-      // Call API endpoint
-      const response = await fetch('/api/technicians', {
+      const response = await fetch('/api/personnel', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -505,28 +537,27 @@ function CreateTechnicianModal({ isOpen, onClose, onSuccess }: CreateTechnicianM
           full_name: formData.full_name.trim(),
           email: formData.email.trim(),
           phone: formData.phone.trim() || null,
-          zone: formData.zone.trim() || null,
-          vehicle: formData.vehicle.trim() || null,
+          role: formData.role,
+          zone: isTechnicianRole ? (formData.zone.trim() || null) : null,
+          vehicle: isTechnicianRole ? (formData.vehicle.trim() || null) : null,
         }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        // Handle different error status codes
         if (response.status === 401) {
           setError('Tu sesión expiró. Inicia sesión nuevamente.');
         } else if (response.status === 403) {
-          setError(data.error || 'No tienes permisos para crear técnicos.');
-        } else if (response.status === 500) {
-          setError('Error del servidor. Intenta nuevamente.');
+          setError(data.error || 'No tienes permisos para crear personal.');
+        } else if (response.status === 409) {
+          setError('Ya existe un usuario con ese correo electrónico.');
         } else {
-          setError(data.error || 'No se pudo crear el técnico.');
+          setError(data.error || 'No se pudo crear el personal.');
         }
         return;
       }
 
-      // Show credentials modal
       setCredentials({
         email: formData.email.trim(),
         temporaryPassword: data.temporaryPassword,
@@ -544,10 +575,9 @@ function CreateTechnicianModal({ isOpen, onClose, onSuccess }: CreateTechnicianM
     onSuccess();
   }
 
-  // Show credentials modal after successful creation
   if (credentials) {
     return (
-      <Modal isOpen={isOpen} onClose={handleCredentialsClose} title="Técnico creado">
+      <Modal isOpen={isOpen} onClose={handleCredentialsClose} title="Personal creado">
         <CredentialsDisplay
           email={credentials.email}
           temporaryPassword={credentials.temporaryPassword}
@@ -558,7 +588,7 @@ function CreateTechnicianModal({ isOpen, onClose, onSuccess }: CreateTechnicianM
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Nuevo técnico">
+    <Modal isOpen={isOpen} onClose={onClose} title="Agregar personal">
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && (
           <div className="p-3 bg-red-50 text-red-600 rounded-md text-sm">{error}</div>
@@ -601,24 +631,48 @@ function CreateTechnicianModal({ isOpen, onClose, onSuccess }: CreateTechnicianM
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">Zona</label>
-          <input
-            type="text"
-            value={formData.zone}
-            onChange={e => setFormData({ ...formData, zone: e.target.value })}
+          <label className="block text-sm font-medium mb-1">
+            Rol <span className="text-red-600">*</span>
+          </label>
+          <select
+            value={formData.role}
+            onChange={e => setFormData({ ...formData, role: e.target.value as UserRole })}
             className="w-full px-3 py-2 border rounded-md"
-          />
+            required
+          >
+            {availableRoles.map(role => (
+              <option key={role} value={role}>
+                {role === UserRole.ADMIN && 'Administrador'}
+                {role === UserRole.SUPPORT && 'Soporte'}
+                {role === UserRole.TECHNICIAN && 'Técnico'}
+              </option>
+            ))}
+          </select>
         </div>
 
-        <div>
-          <label className="block text-sm font-medium mb-1">Vehículo</label>
-          <input
-            type="text"
-            value={formData.vehicle}
-            onChange={e => setFormData({ ...formData, vehicle: e.target.value })}
-            className="w-full px-3 py-2 border rounded-md"
-          />
-        </div>
+        {isTechnicianRole && (
+          <>
+            <div>
+              <label className="block text-sm font-medium mb-1">Zona</label>
+              <input
+                type="text"
+                value={formData.zone}
+                onChange={e => setFormData({ ...formData, zone: e.target.value })}
+                className="w-full px-3 py-2 border rounded-md"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">Vehículo</label>
+              <input
+                type="text"
+                value={formData.vehicle}
+                onChange={e => setFormData({ ...formData, vehicle: e.target.value })}
+                className="w-full px-3 py-2 border rounded-md"
+              />
+            </div>
+          </>
+        )}
 
         <div className="flex gap-3 justify-end pt-4">
           <button
@@ -633,7 +687,7 @@ function CreateTechnicianModal({ isOpen, onClose, onSuccess }: CreateTechnicianM
             disabled={submitting}
             className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 transition"
           >
-            {submitting ? 'Creando...' : 'Crear técnico'}
+            {submitting ? 'Creando...' : 'Crear'}
           </button>
         </div>
       </form>
@@ -646,6 +700,7 @@ interface EditPersonnelModalProps {
   onClose: () => void;
   onSuccess: () => void;
   person: PersonnelRecord | null;
+  callerRole?: string;
 }
 
 function EditPersonnelModal({
@@ -653,27 +708,43 @@ function EditPersonnelModal({
   onClose,
   onSuccess,
   person,
+  callerRole,
 }: EditPersonnelModalProps) {
   const [formData, setFormData] = useState({
     full_name: '',
     phone: '',
+    newRole: '',
     zone: '',
     vehicle: '',
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
+  // Determine available roles for transition
+  const canChangeRole = callerRole === UserRole.SUPER_ADMIN ||
+    (callerRole === UserRole.ADMIN &&
+     person?.role !== UserRole.ADMIN &&
+     person?.role !== UserRole.SUPER_ADMIN);
+
+  const availableRoles = callerRole === UserRole.SUPER_ADMIN
+    ? [UserRole.ADMIN, UserRole.SUPPORT, UserRole.TECHNICIAN]
+    : [UserRole.SUPPORT, UserRole.TECHNICIAN];
+
   useEffect(() => {
     if (person) {
       setFormData({
         full_name: person.full_name || '',
         phone: person.phone || '',
+        newRole: '',
         zone: person.technician?.zone || '',
         vehicle: person.technician?.vehicle || '',
       });
     }
     setError('');
   }, [person, isOpen]);
+
+  const currentRole = formData.newRole || person?.role;
+  const isTechnicianRole = currentRole === UserRole.TECHNICIAN;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -689,28 +760,42 @@ function EditPersonnelModal({
     setSubmitting(true);
 
     try {
-      // Update profile
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        setError('No hay sesión activa');
+        setSubmitting(false);
+        return;
+      }
+
+      const response = await fetch('/api/personnel', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          id: person.id,
           full_name: formData.full_name.trim(),
           phone: formData.phone.trim() || null,
-        })
-        .eq('id', person.id);
+          newRole: formData.newRole || undefined,
+          zone: isTechnicianRole ? (formData.zone.trim() || null) : undefined,
+          vehicle: isTechnicianRole ? (formData.vehicle.trim() || null) : undefined,
+        }),
+      });
 
-      if (profileError) throw profileError;
+      const data = await response.json();
 
-      // Update technician if exists
-      if (person.technician) {
-        const { error: techError } = await supabase
-          .from('technicians')
-          .update({
-            zone: formData.zone.trim() || null,
-            vehicle: formData.vehicle.trim() || null,
-          })
-          .eq('id', person.technician.id);
-
-        if (techError) throw techError;
+      if (!response.ok) {
+        if (response.status === 401) {
+          setError('Tu sesión expiró. Inicia sesión nuevamente.');
+        } else if (response.status === 403) {
+          setError(data.error || 'No tienes permisos para editar este personal.');
+        } else if (response.status === 409) {
+          setError(data.error || 'Conflicto: el personal tiene tickets activos sin cerrar.');
+        } else {
+          setError(data.error || 'No se pudo actualizar el personal.');
+        }
+        return;
       }
 
       onSuccess();
@@ -720,8 +805,6 @@ function EditPersonnelModal({
       setSubmitting(false);
     }
   }
-
-  const isTechnician = person?.role === UserRole.TECHNICIAN;
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Editar personal">
@@ -753,7 +836,32 @@ function EditPersonnelModal({
           />
         </div>
 
-        {isTechnician && (
+        {canChangeRole && (
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Cambiar rol
+            </label>
+            <select
+              value={formData.newRole}
+              onChange={e => setFormData({ ...formData, newRole: e.target.value })}
+              className="w-full px-3 py-2 border rounded-md"
+            >
+              <option value="">-- Mantener rol actual: {person?.role === UserRole.ADMIN ? 'Administrador' : person?.role === UserRole.SUPPORT ? 'Soporte' : 'Técnico'} --</option>
+              {availableRoles.map(role => (
+                <option key={role} value={role}>
+                  {role === UserRole.ADMIN && 'Administrador'}
+                  {role === UserRole.SUPPORT && 'Soporte'}
+                  {role === UserRole.TECHNICIAN && 'Técnico'}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              ⚠️ Si el personal tiene tickets activos, no se podrá cambiar el rol
+            </p>
+          </div>
+        )}
+
+        {isTechnicianRole && (
           <>
             <div>
               <label className="block text-sm font-medium mb-1">Zona</label>
