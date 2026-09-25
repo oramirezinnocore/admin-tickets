@@ -5,7 +5,7 @@ import { hasValidCoordinates } from '@wisper/shared';
 
 const IMPORT_LIMIT = 10000;
 const GEOCODE_BATCH_SIZE = 5; // Max concurrent geocoding requests
-const GEOCODE_LIMIT = 500; // Max addresses to geocode synchronously
+const GEOCODE_LIMIT = 50; // Max addresses to geocode synchronously (fits in 60s timeout)
 const STAGING_BATCH_SIZE = 500; // Staging insert batch size
 
 interface ImportRow {
@@ -64,6 +64,32 @@ function normalizeDMS(degrees: number, minutes: number, seconds: number): {
   }
 
   return { degrees, minutes, seconds };
+}
+
+/**
+ * Compute SHA-256 hash of validated rows for integrity checking
+ */
+async function computeContentHash(validatedRows: ValidationResult[]): Promise<string> {
+  // Create deterministic string from validated data
+  const content = validatedRows
+    .filter(r => r.isValid)
+    .map(r => JSON.stringify({
+      name: r.data.name,
+      address: r.data.address,
+      phone: r.data.phone || '',
+      reference: r.data.reference || '',
+      latitude: r.data.latitude,
+      longitude: r.data.longitude,
+    }))
+    .join('\n');
+
+  // Compute SHA-256 hash
+  const encoder = new TextEncoder();
+  const data = encoder.encode(content);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  return hashHex;
 }
 
 /**
@@ -596,6 +622,10 @@ async function handleAtomicImport(
 
   console.log(`[Import] Starting atomic import ${importId} with ${clientsToStage.length} clients`);
 
+  // Compute content hash for integrity checking
+  const contentHash = await computeContentHash(validatedRows);
+  console.log(`[Import] Content hash: ${contentHash.substring(0, 16)}...`);
+
   try {
     // Step 1: Create import job for tracking and idempotency
     const { error: jobError } = await supabase.from('client_import_jobs').insert({
@@ -603,19 +633,33 @@ async function handleAtomicImport(
       user_id: userId,
       status: 'pending',
       total_records: clientsToStage.length,
+      content_hash: contentHash,
     });
 
     if (jobError) {
       // Check if it's a duplicate key error (job already exists)
       if (jobError.code === '23505') {
-        // Job already exists - check its status
+        // Job already exists - check its status and hash
         const { data: existingJob } = await supabase
           .from('client_import_jobs')
-          .select('status, imported_records, error_message')
+          .select('status, imported_records, error_message, content_hash')
           .eq('import_id', importId)
           .single();
 
-        if (existingJob?.status === 'committed') {
+        if (!existingJob) {
+          throw new Error('Import job exists but could not be retrieved');
+        }
+
+        // Check for data integrity: same import_id with different content
+        if (existingJob.content_hash && existingJob.content_hash !== contentHash) {
+          console.error(`[Import] Content hash mismatch for ${importId}`);
+          return NextResponse.json({
+            error: 'El ID de importación ya existe con datos diferentes',
+            details: 'No se puede reutilizar un ID de importación con contenido distinto. Por favor valida nuevamente para generar un nuevo ID.',
+          }, { status: 409 });
+        }
+
+        if (existingJob.status === 'committed') {
           // Already successfully imported - idempotency
           console.log(`[Import] Import ${importId} already completed (idempotent)`);
           return NextResponse.json({
@@ -626,8 +670,36 @@ async function handleAtomicImport(
           });
         }
 
-        // If failed or staging, allow retry by continuing
-        console.log(`[Import] Retrying import ${importId} (previous status: ${existingJob?.status})`);
+        // If failed, pending, or staging: allow retry
+        console.log(`[Import] Retrying import ${importId} (previous status: ${existingJob.status})`);
+
+        // Clear any existing staging records to prevent duplicates
+        const { error: clearError } = await supabase
+          .from('client_import_staging')
+          .delete()
+          .eq('import_id', importId);
+
+        if (clearError) {
+          console.error(`[Import] Failed to clear staging records:`, clearError);
+          throw new Error(`Error al limpiar registros previos: ${clearError.message}`);
+        }
+
+        // Reset job to pending to allow fresh retry
+        const { error: resetError } = await supabase
+          .from('client_import_jobs')
+          .update({
+            status: 'pending',
+            error_message: null,
+            completed_at: null,
+          })
+          .eq('import_id', importId);
+
+        if (resetError) {
+          console.error(`[Import] Failed to reset job status:`, resetError);
+          throw new Error(`Error al reiniciar trabajo: ${resetError.message}`);
+        }
+
+        console.log(`[Import] Cleared staging and reset job for retry`);
       } else {
         throw jobError;
       }
@@ -664,11 +736,11 @@ async function handleAtomicImport(
     console.log(`[Import] All records staged, calling atomic commit function`);
 
     // Step 3: Commit atomically using database function
+    // Note: Function derives caller identity from auth.uid(), not passed as parameter
     const { data: commitResult, error: commitError } = await supabase.rpc(
       'commit_client_import',
       {
         p_import_id: importId,
-        p_user_id: userId,
       }
     );
 
@@ -689,7 +761,26 @@ async function handleAtomicImport(
     const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
     console.error(`[Import] Import ${importId} failed:`, error);
 
-    // Update job status to failed
+    // Check current job status before marking as failed
+    // Critical: If RPC committed successfully but timed out, don't overwrite 'committed'
+    const { data: currentJob } = await supabase
+      .from('client_import_jobs')
+      .select('status, imported_records')
+      .eq('import_id', importId)
+      .single();
+
+    if (currentJob?.status === 'committed') {
+      // RPC succeeded but we lost the response (timeout/network error)
+      console.log(`[Import] Job ${importId} already committed despite error`);
+      return NextResponse.json({
+        success: true,
+        imported: currentJob.imported_records,
+        message: 'Importación completada (recuperado después de timeout)',
+        idempotent: true,
+      });
+    }
+
+    // Only mark as failed if not already committed
     await supabase
       .from('client_import_jobs')
       .update({
@@ -697,7 +788,8 @@ async function handleAtomicImport(
         error_message: errorMessage,
         completed_at: new Date().toISOString(),
       })
-      .eq('import_id', importId);
+      .eq('import_id', importId)
+      .neq('status', 'committed'); // Safety: don't overwrite committed status
 
     return NextResponse.json(
       {
