@@ -10,6 +10,8 @@ import AnimatedMetric from '@/components/ui/AnimatedMetric';
 import StatusBadge from '@/components/ui/StatusBadge';
 import LoadingSkeleton from '@/components/ui/LoadingSkeleton';
 import EmptyState from '@/components/ui/EmptyState';
+import SlidePanel from '@/components/ui/SlidePanel';
+import AttentionPanel from '@/components/AttentionPanel';
 import { supabase } from '@/lib/supabase';
 import {
   Ticket,
@@ -21,6 +23,7 @@ import {
   formatTicketAge,
   getSlaOrderPriority,
   TicketSlaState,
+  getTicketSlaLabel,
 } from '@wisper/shared';
 import {
   AlertCircle,
@@ -43,6 +46,8 @@ export default function DashboardPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [tickets, setTickets] = useState<TicketWithRelations[]>([]);
+  const [slaPanelOpen, setSlaPanelOpen] = useState(false);
+  const [selectedSla, setSelectedSla] = useState<TicketSlaState | null>(null);
   const [stats, setStats] = useState({
     createdToday: 0,
     resolvedToday: 0,
@@ -356,7 +361,10 @@ export default function DashboardPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
             <div
               className="flex flex-col items-center cursor-pointer hover:scale-105 transition-transform"
-              onClick={() => router.push('/tickets?sla=green')}
+              onClick={() => {
+                setSelectedSla(TicketSlaState.GREEN);
+                setSlaPanelOpen(true);
+              }}
             >
               <AnimatedMetric
                 value={stats.green}
@@ -369,7 +377,10 @@ export default function DashboardPage() {
             </div>
             <div
               className="flex flex-col items-center cursor-pointer hover:scale-105 transition-transform"
-              onClick={() => router.push('/tickets?sla=yellow')}
+              onClick={() => {
+                setSelectedSla(TicketSlaState.YELLOW);
+                setSlaPanelOpen(true);
+              }}
             >
               <AnimatedMetric
                 value={stats.yellow}
@@ -382,7 +393,10 @@ export default function DashboardPage() {
             </div>
             <div
               className="flex flex-col items-center cursor-pointer hover:scale-105 transition-transform"
-              onClick={() => router.push('/tickets?sla=red')}
+              onClick={() => {
+                setSelectedSla(TicketSlaState.RED);
+                setSlaPanelOpen(true);
+              }}
             >
               <AnimatedMetric
                 value={stats.red}
@@ -395,7 +409,10 @@ export default function DashboardPage() {
             </div>
             <div
               className="flex flex-col items-center cursor-pointer hover:scale-105 transition-transform"
-              onClick={() => router.push('/tickets?sla=overdue')}
+              onClick={() => {
+                setSelectedSla(TicketSlaState.OVERDUE);
+                setSlaPanelOpen(true);
+              }}
             >
               <AnimatedMetric
                 value={stats.overdue}
@@ -408,6 +425,14 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Attention Panel */}
+      <div className="mb-8">
+        <AttentionPanel
+          tickets={tickets}
+          onTicketClick={(id) => router.push(`/tickets/${id}`)}
+        />
       </div>
 
       {/* Secondary metrics */}
@@ -558,6 +583,67 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* SLA Panel */}
+      <SlidePanel
+        isOpen={slaPanelOpen}
+        onClose={() => setSlaPanelOpen(false)}
+        title={`Tickets ${selectedSla ? getTicketSlaLabel(selectedSla).toLowerCase() + 's' : ''}`}
+        width="lg"
+      >
+        {selectedSla && (
+          <div className="space-y-3">
+            {tickets
+              .filter(t => t.status !== 'RESOLVED' && t.status !== 'CANCELLED')
+              .filter(t => getTicketSlaState(t.created_at) === selectedSla)
+              .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+              .map(ticket => (
+                <div
+                  key={ticket.id}
+                  onClick={() => {
+                    setSlaPanelOpen(false);
+                    router.push(`/tickets/${ticket.id}`);
+                  }}
+                  className="p-4 bg-white border border-gray-200 rounded-lg hover:shadow-md transition-shadow cursor-pointer"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1">
+                      <p className="font-mono text-sm font-semibold text-gray-900 mb-1">
+                        {formatTicketFolio(ticket.folio)}
+                      </p>
+                      <p className="text-sm text-gray-900 font-medium">{ticket.client?.name}</p>
+                      <p className="text-xs text-gray-600 mt-1">
+                        {ticket.technician?.profile?.full_name || 'Sin asignar'}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <StatusBadge
+                        status={getTicketSlaLabel(selectedSla)}
+                        variant={getSlaVariant(selectedSla)}
+                        size="sm"
+                        dot
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        {formatTicketAge(ticket.created_at)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            {tickets.filter(t =>
+              t.status !== 'RESOLVED' &&
+              t.status !== 'CANCELLED' &&
+              getTicketSlaState(t.created_at) === selectedSla
+            ).length === 0 && (
+              <EmptyState
+                icon={Clock}
+                title="No hay tickets en esta categoría"
+                description="Todos los tickets han sido resueltos o se encuentran en otra categoría SLA"
+              />
+            )}
+          </div>
+        )}
+      </SlidePanel>
     </ProtectedLayout>
   );
 }

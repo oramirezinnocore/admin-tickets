@@ -2,6 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import ProtectedLayout from '@/components/ProtectedLayout';
+import PageHeader from '@/components/ui/PageHeader';
+import LoadingSkeleton from '@/components/ui/LoadingSkeleton';
+import DonutChart from '@/components/ui/DonutChart';
 import { supabase } from '@/lib/supabase';
 import {
   Ticket,
@@ -14,6 +17,7 @@ import {
   formatDuration,
   formatTicketFolio,
 } from '@wisper/shared';
+import { Download, TrendingUp, Clock, CheckCircle2 } from 'lucide-react';
 import Papa from 'papaparse';
 
 interface TicketWithRelations extends Ticket {
@@ -184,27 +188,50 @@ export default function ReportsPage() {
     document.body.removeChild(link);
   }
 
+  // Prepare status donut data
+  const statusDonutData = Object.entries(statusBreakdown).map(([status, count]) => ({
+    label: getStatusLabel(status as TicketStatus),
+    value: count,
+    color: getStatusColor(status as TicketStatus)
+  }));
+
+  // Prepare SLA donut data
+  const slaDonutData = [
+    { label: 'Verde (0-24h)', value: slaMetrics.green, color: 'var(--color-sla-green)' },
+    { label: 'Amarillo (24-48h)', value: slaMetrics.yellow, color: 'var(--color-sla-yellow)' },
+    { label: 'Rojo (48-72h)', value: slaMetrics.red, color: 'var(--color-sla-red)' },
+    { label: 'Vencido (+72h)', value: slaMetrics.overdue, color: 'var(--wisper-red)' }
+  ];
+
   if (loading) {
     return (
       <ProtectedLayout>
-        <div className="text-center py-12">Cargando reportes...</div>
+        <PageHeader title="Reportes" description="Dashboard analítico de tickets" />
+        <LoadingSkeleton variant="metric" />
       </ProtectedLayout>
     );
   }
 
   return (
     <ProtectedLayout>
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="flex justify-between items-center">
-          <h1 className="text-3xl font-bold">Reportes</h1>
+      <PageHeader
+        title="Reportes"
+        description="Dashboard analítico de tickets"
+        actions={
           <button
             onClick={handleExportCSV}
-            className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition"
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors"
+            style={{ backgroundColor: '#10b981' }}
+            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#059669'}
+            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#10b981'}
           >
+            <Download className="h-4 w-4" />
             Exportar CSV
           </button>
-        </div>
+        }
+      />
+
+      <div className="space-y-6">
 
         {/* Date Filters */}
         <div className="bg-white rounded-lg shadow p-4">
@@ -268,71 +295,87 @@ export default function ReportsPage() {
         </div>
 
         {/* Summary KPIs */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <KPICard title="Tickets creados" value={kpis.created} />
-          <KPICard title="Tickets cerrados" value={kpis.closed} />
-          <KPICard title="Tickets abiertos" value={kpis.open} />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-3 bg-blue-100 rounded-lg">
+                <TrendingUp className="h-6 w-6 text-blue-600" />
+              </div>
+              <h3 className="text-sm font-medium text-gray-600">Tickets creados</h3>
+            </div>
+            <div className="text-3xl font-bold text-gray-900">{kpis.created}</div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-3 bg-green-100 rounded-lg">
+                <CheckCircle2 className="h-6 w-6 text-green-600" />
+              </div>
+              <h3 className="text-sm font-medium text-gray-600">Tickets cerrados</h3>
+            </div>
+            <div className="text-3xl font-bold text-green-600">{kpis.closed}</div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-3 bg-orange-100 rounded-lg">
+                <Clock className="h-6 w-6 text-orange-600" />
+              </div>
+              <h3 className="text-sm font-medium text-gray-600">Tickets abiertos</h3>
+            </div>
+            <div className="text-3xl font-bold text-orange-600">{kpis.open}</div>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <KPICard
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <TimeCard
             title="Tiempo promedio hasta atención"
             value={kpis.avgTimeToAttention}
             subtitle={kpis.timeToAttentionCount > 0 ? `(${kpis.timeToAttentionCount} tickets)` : undefined}
           />
-          <KPICard
+          <TimeCard
             title="Tiempo promedio de atención"
             value={kpis.avgAttentionTime}
             subtitle={kpis.attentionTimeCount > 0 ? `(${kpis.attentionTimeCount} tickets)` : undefined}
           />
-          <KPICard
+          <TimeCard
             title="Tiempo promedio total"
             value={kpis.avgTotalTime}
             subtitle={kpis.totalTimeCount > 0 ? `(${kpis.totalTimeCount} tickets)` : undefined}
           />
         </div>
 
-        {/* Status Breakdown */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold mb-4">Distribución por Estado</h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-            {Object.entries(statusBreakdown).map(([status, count]) => (
-              <div key={status} className="text-center p-3 bg-gray-50 rounded-lg">
-                <div className="text-2xl font-bold text-gray-900">{count}</div>
-                <div className="text-xs text-gray-600 mt-1">{getStatusLabel(status as TicketStatus)}</div>
-              </div>
-            ))}
+        {/* Charts Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Status Distribution */}
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold mb-6">Distribución por Estado</h2>
+            <DonutChart
+              segments={statusDonutData}
+              centerLabel="Total"
+              centerValue={tickets.length}
+              size={240}
+              thickness={40}
+            />
           </div>
-        </div>
 
-        {/* SLA Metrics */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold mb-4">Cumplimiento SLA (Tickets Activos)</h2>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <div className="text-center p-3 bg-green-50 rounded-lg">
-              <div className="text-2xl font-bold text-green-800">{slaMetrics.green}</div>
-              <div className="text-xs text-gray-600 mt-1">0-24h (Verde)</div>
-            </div>
-            <div className="text-center p-3 bg-yellow-50 rounded-lg">
-              <div className="text-2xl font-bold text-yellow-800">{slaMetrics.yellow}</div>
-              <div className="text-xs text-gray-600 mt-1">24-48h (Amarillo)</div>
-            </div>
-            <div className="text-center p-3 bg-red-50 rounded-lg">
-              <div className="text-2xl font-bold text-red-800">{slaMetrics.red}</div>
-              <div className="text-xs text-gray-600 mt-1">48-72h (Rojo)</div>
-            </div>
-            <div className="text-center p-3 bg-gray-100 rounded-lg">
-              <div className="text-2xl font-bold text-gray-900">{slaMetrics.overdue}</div>
-              <div className="text-xs text-gray-600 mt-1">+72h (Vencido)</div>
-            </div>
-            <div className="text-center p-3 bg-blue-50 rounded-lg">
-              <div className="text-2xl font-bold text-blue-900">{slaMetrics.compliance}%</div>
-              <div className="text-xs text-gray-600 mt-1">Dentro de 72h</div>
-            </div>
+          {/* SLA Distribution */}
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold mb-2">Cumplimiento SLA (Tickets Activos)</h2>
+            <p className="text-sm text-gray-600 mb-6">
+              {slaMetrics.compliance}% dentro de 72h
+            </p>
+            <DonutChart
+              segments={slaDonutData}
+              centerLabel="Activos"
+              centerValue={slaMetrics.green + slaMetrics.yellow + slaMetrics.red + slaMetrics.overdue}
+              size={240}
+              thickness={40}
+            />
+            <p className="text-xs text-gray-500 mt-4">
+              * SLA calculado sobre tickets activos basado en tiempo transcurrido desde creación
+            </p>
           </div>
-          <p className="text-xs text-gray-500 mt-3">
-            * SLA calculado sobre tickets activos (no cerrados ni cancelados) basado en tiempo transcurrido desde creación
-          </p>
         </div>
 
         {/* Technician Metrics */}
@@ -457,7 +500,7 @@ export default function ReportsPage() {
   );
 }
 
-function KPICard({
+function TimeCard({
   title,
   value,
   subtitle,
@@ -467,12 +510,24 @@ function KPICard({
   subtitle?: string;
 }) {
   return (
-    <div className="bg-white rounded-lg shadow p-6">
-      <h3 className="text-sm font-medium text-gray-600 mb-2">{title}</h3>
-      <div className="text-3xl font-bold text-gray-900">{value}</div>
-      {subtitle && <p className="text-xs text-gray-500 mt-1">{subtitle}</p>}
+    <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <h3 className="text-sm font-medium text-gray-600 mb-4">{title}</h3>
+      <div className="text-3xl font-bold text-gray-900 font-mono">{value}</div>
+      {subtitle && <p className="text-xs text-gray-500 mt-2">{subtitle}</p>}
     </div>
   );
+}
+
+function getStatusColor(status: TicketStatus | string): string {
+  const colors: Record<string, string> = {
+    PENDING: '#9ca3af',
+    ASSIGNED: '#3b82f6',
+    IN_REVIEW: '#8b5cf6',
+    PAUSED: '#f59e0b',
+    RESOLVED: '#10b981',
+    CANCELLED: '#ef4444',
+  };
+  return colors[status] || '#9ca3af';
 }
 
 function calculateKPIs(tickets: TicketWithRelations[]) {
