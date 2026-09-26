@@ -3,8 +3,11 @@
 import { useState, useEffect, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import ProtectedLayout from '@/components/ProtectedLayout';
+import PageHeader from '@/components/ui/PageHeader';
+import StatusBadge from '@/components/ui/StatusBadge';
+import EmptyState from '@/components/ui/EmptyState';
+import LoadingSkeleton from '@/components/ui/LoadingSkeleton';
 import Modal from '@/components/ui/Modal';
-import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import Combobox from '@/components/ui/Combobox';
 import type { ComboboxOption } from '@/components/ui/Combobox';
 import { supabase } from '@/lib/supabase';
@@ -21,6 +24,7 @@ import {
   formatTicketFolio,
   getSlaOrderPriority,
 } from '@wisper/shared';
+import { Search, Plus, Ticket as TicketIcon, Filter, X } from 'lucide-react';
 
 interface TicketWithRelations extends Ticket {
   client: Client;
@@ -43,19 +47,18 @@ function TicketsPageContent() {
   const [technicianFilter, setTechnicianFilter] = useState<string>('all');
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'resolved-today' | 'month' | 'year'>('all');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [showFilters, setShowFilters] = useState(true);
   const [error, setError] = useState('');
   const [, setRefreshCounter] = useState(0);
 
-  // Get unique technicians from tickets (deduplicated by ID)
+  // Get unique technicians from tickets
   const uniqueTechnicians = useMemo(() => {
     const techMap = new Map<string, Technician & { profile: Profile }>();
-
     tickets.forEach(ticket => {
       if (ticket.technician) {
         techMap.set(ticket.technician.id, ticket.technician);
       }
     });
-
     return Array.from(techMap.values());
   }, [tickets]);
 
@@ -64,7 +67,7 @@ function TicketsPageContent() {
   }, []);
 
   useEffect(() => {
-    // Apply query params whenever they change
+    // Apply query params
     const statusParam = searchParams.get('status');
     const slaParam = searchParams.get('sla');
     const filterParam = searchParams.get('filter');
@@ -85,7 +88,6 @@ function TicketsPageContent() {
     }
 
     if (slaParam) {
-      // Map lowercase query param to uppercase enum value
       const slaMap: Record<string, TicketSlaState> = {
         'green': TicketSlaState.GREEN,
         'yellow': TicketSlaState.YELLOW,
@@ -115,7 +117,6 @@ function TicketsPageContent() {
     const interval = setInterval(() => {
       setRefreshCounter(c => c + 1);
     }, 60000);
-
     return () => clearInterval(interval);
   }, []);
 
@@ -154,15 +155,10 @@ function TicketsPageContent() {
     if (dateFilter === 'today') {
       const now = new Date();
       const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      // "Tickets de hoy" = tickets CREADOS hoy, regardless of status
-      filtered = filtered.filter(t => {
-        const createdAt = new Date(t.created_at);
-        return createdAt >= today;
-      });
+      filtered = filtered.filter(t => new Date(t.created_at) >= today);
     } else if (dateFilter === 'resolved-today') {
       const now = new Date();
       const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      // "Resueltos hoy" = tickets CERRADOS hoy (for resolved tickets only)
       filtered = filtered.filter(t => {
         const closedAt = t.closed_at ? new Date(t.closed_at) : null;
         return closedAt && closedAt >= today;
@@ -227,43 +223,42 @@ function TicketsPageContent() {
         return priorityA - priorityB;
       }
 
-      // Within same priority, older first
       return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
     });
 
     setFilteredTickets(filtered);
   }
 
-  function getSlaColor(slaState: TicketSlaState): string {
-    switch (slaState) {
-      case TicketSlaState.GREEN:
-        return 'bg-green-100 text-green-800';
-      case TicketSlaState.YELLOW:
-        return 'bg-yellow-100 text-yellow-800';
-      case TicketSlaState.RED:
-      case TicketSlaState.OVERDUE:
-        return 'bg-red-100 text-red-800';
+  function getStatusVariant(status: TicketStatus): 'default' | 'primary' | 'success' | 'warning' | 'danger' | 'info' {
+    switch (status) {
+      case 'PENDING':
+        return 'default';
+      case 'ASSIGNED':
+        return 'primary';
+      case 'IN_REVIEW':
+        return 'info';
+      case 'PAUSED':
+        return 'warning';
+      case 'RESOLVED':
+        return 'success';
+      case 'CANCELLED':
+        return 'danger';
       default:
-        return 'bg-gray-100 text-gray-800';
+        return 'default';
     }
   }
 
-  function getStatusColor(status: TicketStatus): string {
-    switch (status) {
-      case 'PENDING':
-        return 'bg-gray-100 text-gray-800';
-      case 'ASSIGNED':
-        return 'bg-blue-100 text-blue-800';
-      case 'IN_REVIEW':
-        return 'bg-purple-100 text-purple-800';
-      case 'PAUSED':
-        return 'bg-orange-100 text-orange-800';
-      case 'RESOLVED':
-        return 'bg-green-100 text-green-800';
-      case 'CANCELLED':
-        return 'bg-red-100 text-red-800';
+  function getSlaVariant(slaState: TicketSlaState): 'success' | 'warning' | 'danger' {
+    switch (slaState) {
+      case TicketSlaState.GREEN:
+        return 'success';
+      case TicketSlaState.YELLOW:
+        return 'warning';
+      case TicketSlaState.RED:
+      case TicketSlaState.OVERDUE:
+        return 'danger';
       default:
-        return 'bg-gray-100 text-gray-800';
+        return 'success';
     }
   }
 
@@ -279,160 +274,277 @@ function TicketsPageContent() {
     return labels[status] || status;
   }
 
+  const hasActiveFilters = statusFilter !== 'all' || slaFilter !== 'all' || technicianFilter !== 'all' || dateFilter !== 'all';
+
+  function clearFilters() {
+    setStatusFilter('all');
+    setStatusMultiFilter([]);
+    setSlaFilter('all');
+    setTechnicianFilter('all');
+    setDateFilter('all');
+    setSearchQuery('');
+  }
+
   if (loading) {
     return (
       <ProtectedLayout>
-        <div className="text-center py-12">Cargando...</div>
+        <PageHeader title="Tickets" description="Gestión de tickets de soporte" />
+        <LoadingSkeleton variant="table" rows={10} />
       </ProtectedLayout>
     );
   }
 
   return (
     <ProtectedLayout>
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-4">Tickets</h1>
-
-        <div className="flex flex-col sm:flex-row gap-4 mb-4">
-          <input
-            type="text"
-            placeholder="Buscar por folio, cliente, falla o técnico..."
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            className="flex-1 px-4 py-2 border rounded-md"
-          />
+      <PageHeader
+        title="Tickets"
+        description="Gestión de tickets de soporte"
+        stats={[
+          { label: 'tickets', value: filteredTickets.length }
+        ]}
+        actions={
           <button
             onClick={() => setIsCreateModalOpen(true)}
-            className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors"
+            style={{ backgroundColor: 'var(--wisper-blue)' }}
+            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--wisper-blue-hover)'}
+            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'var(--wisper-blue)'}
           >
+            <Plus className="h-4 w-4" />
             Nuevo ticket
+          </button>
+        }
+      />
+
+      {error && (
+        <div className="mb-4 p-4 bg-red-50 border border-red-200 text-red-600 rounded-xl text-sm">
+          {error}
+        </div>
+      )}
+
+      {/* Search & Filters */}
+      <div className="mb-6 space-y-4">
+        <div className="flex gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Buscar por folio, cliente, falla o técnico..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:border-transparent text-sm"
+              style={{ '--tw-ring-color': 'var(--wisper-blue)' } as any}
+            />
+          </div>
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={`flex items-center gap-2 px-4 py-2.5 border rounded-lg text-sm font-medium transition-colors ${
+              showFilters ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            <Filter className="h-4 w-4" />
+            Filtros
+            {hasActiveFilters && (
+              <span className="ml-1 px-1.5 py-0.5 bg-blue-600 text-white text-xs rounded-full">
+                {[statusFilter !== 'all', slaFilter !== 'all', technicianFilter !== 'all', dateFilter !== 'all'].filter(Boolean).length}
+              </span>
+            )}
           </button>
         </div>
 
-        <div className="flex flex-wrap gap-2 mb-2">
-          <select
-            value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value as StatusFilter)}
-            className="px-3 py-2 border rounded-md"
-          >
-            <option value="all">Todos los estados</option>
-            <option value="PENDING">Pendiente</option>
-            <option value="ASSIGNED">Asignado</option>
-            <option value="IN_REVIEW">En revisión</option>
-            <option value="PAUSED">Pausado</option>
-            <option value="RESOLVED">Resuelto</option>
-            <option value="CANCELLED">Cancelado</option>
-          </select>
+        {showFilters && (
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Estado</label>
+                <select
+                  value={statusFilter}
+                  onChange={e => setStatusFilter(e.target.value as StatusFilter)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:border-transparent"
+                  style={{ '--tw-ring-color': 'var(--wisper-blue)' } as any}
+                >
+                  <option value="all">Todos</option>
+                  <option value="PENDING">Pendiente</option>
+                  <option value="ASSIGNED">Asignado</option>
+                  <option value="IN_REVIEW">En revisión</option>
+                  <option value="PAUSED">Pausado</option>
+                  <option value="RESOLVED">Resuelto</option>
+                  <option value="CANCELLED">Cancelado</option>
+                </select>
+              </div>
 
-          <select
-            value={slaFilter}
-            onChange={e => setSlaFilter(e.target.value as SlaFilter)}
-            className="px-3 py-2 border rounded-md"
-          >
-            <option value="all">Todos los SLA</option>
-            <option value={TicketSlaState.GREEN}>Verde (0-24h)</option>
-            <option value={TicketSlaState.YELLOW}>Amarillo (24-48h)</option>
-            <option value={TicketSlaState.RED}>Rojo (48-72h)</option>
-            <option value={TicketSlaState.OVERDUE}>Vencido (+72h)</option>
-          </select>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">SLA</label>
+                <select
+                  value={slaFilter}
+                  onChange={e => setSlaFilter(e.target.value as SlaFilter)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:border-transparent"
+                  style={{ '--tw-ring-color': 'var(--wisper-blue)' } as any}
+                >
+                  <option value="all">Todos</option>
+                  <option value={TicketSlaState.GREEN}>Verde (0-24h)</option>
+                  <option value={TicketSlaState.YELLOW}>Amarillo (24-48h)</option>
+                  <option value={TicketSlaState.RED}>Rojo (48-72h)</option>
+                  <option value={TicketSlaState.OVERDUE}>Vencido (+72h)</option>
+                </select>
+              </div>
 
-          <select
-            value={technicianFilter}
-            onChange={e => setTechnicianFilter(e.target.value)}
-            className="px-3 py-2 border rounded-md"
-          >
-            <option value="all">Todos los técnicos</option>
-            <option value="unassigned">Sin asignar</option>
-            {uniqueTechnicians.map(tech => (
-              <option key={tech.id} value={tech.id}>
-                {tech.profile?.full_name || 'Sin nombre'}
-              </option>
-            ))}
-          </select>
-        </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Técnico</label>
+                <select
+                  value={technicianFilter}
+                  onChange={e => setTechnicianFilter(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:border-transparent"
+                  style={{ '--tw-ring-color': 'var(--wisper-blue)' } as any}
+                >
+                  <option value="all">Todos</option>
+                  <option value="unassigned">Sin asignar</option>
+                  {uniqueTechnicians.map(tech => (
+                    <option key={tech.id} value={tech.id}>
+                      {tech.profile?.full_name || 'Sin nombre'}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-        <p className="text-sm text-gray-600">
-          Mostrando {filteredTickets.length} de {tickets.length} tickets
-        </p>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Período</label>
+                <select
+                  value={dateFilter}
+                  onChange={e => setDateFilter(e.target.value as any)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:border-transparent"
+                  style={{ '--tw-ring-color': 'var(--wisper-blue)' } as any}
+                >
+                  <option value="all">Todos</option>
+                  <option value="today">Hoy</option>
+                  <option value="resolved-today">Resueltos hoy</option>
+                  <option value="month">Este mes</option>
+                  <option value="year">Este año</option>
+                </select>
+              </div>
+            </div>
+
+            {hasActiveFilters && (
+              <div className="mt-4 flex justify-end">
+                <button
+                  onClick={clearFilters}
+                  className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                  Limpiar filtros
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {error && (
-        <div className="mb-4 p-4 bg-red-50 text-red-600 rounded-md">{error}</div>
-      )}
-
+      {/* Table */}
       {filteredTickets.length === 0 ? (
-        <div className="text-center py-12 text-gray-500">No se encontraron tickets</div>
+        <EmptyState
+          icon={TicketIcon}
+          title="No se encontraron tickets"
+          description="Intenta ajustar los filtros o crear un nuevo ticket"
+          action={{
+            label: 'Nuevo ticket',
+            onClick: () => setIsCreateModalOpen(true)
+          }}
+        />
       ) : (
-        <div className="bg-white rounded-lg shadow overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Folio
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Cliente
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Falla
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Técnico
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Estado
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  SLA
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Antigüedad
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                  Acciones
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {filteredTickets.map(ticket => {
-                const slaState = getTicketSlaState(ticket.created_at);
-                return (
-                  <tr key={ticket.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap font-mono text-sm">
-                      {formatTicketFolio(ticket.folio)}
-                    </td>
-                    <td className="px-6 py-4">{ticket.client?.name || '-'}</td>
-                    <td className="px-6 py-4">{ticket.failure_type}</td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {ticket.technician?.profile?.full_name || (
-                        <span className="text-gray-400">Sin asignar</span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 rounded-full text-xs ${getStatusColor(ticket.status)}`}>
-                        {getStatusLabel(ticket.status)}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 rounded-full text-xs ${getSlaColor(slaState)}`}>
-                        {getTicketSlaLabel(slaState)}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      {formatTicketAge(ticket.created_at)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <button
-                        onClick={() => router.push(`/tickets/${ticket.id}`)}
-                        className="text-blue-600 hover:text-blue-900"
-                      >
-                        Ver detalle
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Folio
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Cliente
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Falla
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Técnico
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Estado
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    SLA
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Antigüedad
+                  </th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Acciones
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-100">
+                {filteredTickets.map(ticket => {
+                  const slaState = getTicketSlaState(ticket.created_at);
+                  return (
+                    <tr
+                      key={ticket.id}
+                      className="hover:bg-gray-50 cursor-pointer transition-colors"
+                      onClick={() => router.push(`/tickets/${ticket.id}`)}
+                    >
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="font-mono text-sm font-semibold text-gray-900">
+                          {formatTicketFolio(ticket.folio)}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-sm text-gray-900">{ticket.client?.name || '-'}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-sm text-gray-600">{ticket.failure_type}</span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {ticket.technician?.profile?.full_name ? (
+                          <span className="text-sm text-gray-900">{ticket.technician.profile.full_name}</span>
+                        ) : (
+                          <span className="text-sm text-gray-400">Sin asignar</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <StatusBadge
+                          status={getStatusLabel(ticket.status)}
+                          variant={getStatusVariant(ticket.status)}
+                          size="sm"
+                        />
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <StatusBadge
+                          status={getTicketSlaLabel(slaState)}
+                          variant={getSlaVariant(slaState)}
+                          size="sm"
+                          dot
+                        />
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {formatTicketAge(ticket.created_at)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            router.push(`/tickets/${ticket.id}`);
+                          }}
+                          className="font-medium hover:underline"
+                          style={{ color: 'var(--wisper-blue)' }}
+                        >
+                          Ver detalle
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -498,7 +610,6 @@ function CreateTicketModal({ isOpen, onClose, onSuccess }: CreateTicketModalProp
     setTechnicians((data as any) || []);
   }
 
-  // Prepare client options
   const clientOptions: ComboboxOption[] = useMemo(
     () =>
       clients.map(client => ({
@@ -510,7 +621,6 @@ function CreateTicketModal({ isOpen, onClose, onSuccess }: CreateTicketModalProp
     [clients]
   );
 
-  // Prepare technician options
   const technicianOptions: ComboboxOption[] = useMemo(() => {
     const opts: ComboboxOption[] = [
       {
@@ -589,7 +699,7 @@ function CreateTicketModal({ isOpen, onClose, onSuccess }: CreateTicketModalProp
     <Modal isOpen={isOpen} onClose={onClose} title="Nuevo ticket">
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && (
-          <div className="p-3 bg-red-50 text-red-600 rounded-md text-sm">{error}</div>
+          <div className="p-3 bg-red-50 border border-red-200 text-red-600 rounded-lg text-sm">{error}</div>
         )}
 
         <Combobox
@@ -604,26 +714,28 @@ function CreateTicketModal({ isOpen, onClose, onSuccess }: CreateTicketModalProp
         />
 
         <div>
-          <label className="block text-sm font-medium mb-1">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
             Tipo de falla <span className="text-red-600">*</span>
           </label>
           <input
             type="text"
             value={formData.failure_type}
             onChange={e => setFormData({ ...formData, failure_type: e.target.value })}
-            className="w-full px-3 py-2 border rounded-md"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:border-transparent text-sm"
+            style={{ '--tw-ring-color': 'var(--wisper-blue)' } as any}
             required
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
             Observaciones iniciales
           </label>
           <textarea
             value={formData.admin_notes}
             onChange={e => setFormData({ ...formData, admin_notes: e.target.value })}
-            className="w-full px-3 py-2 border rounded-md"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:border-transparent text-sm"
+            style={{ '--tw-ring-color': 'var(--wisper-blue)' } as any}
             rows={3}
           />
         </div>
@@ -638,18 +750,21 @@ function CreateTicketModal({ isOpen, onClose, onSuccess }: CreateTicketModalProp
           emptyMessage="No se encontraron técnicos"
         />
 
-        <div className="flex gap-3 justify-end pt-4">
+        <div className="flex gap-3 justify-end pt-4 border-t border-gray-200">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-md transition"
+            className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
           >
             Cancelar
           </button>
           <button
             type="submit"
             disabled={submitting}
-            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 transition"
+            className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ backgroundColor: 'var(--wisper-blue)' }}
+            onMouseEnter={(e) => !submitting && (e.currentTarget.style.backgroundColor = 'var(--wisper-blue-hover)')}
+            onMouseLeave={(e) => !submitting && (e.currentTarget.style.backgroundColor = 'var(--wisper-blue)')}
           >
             {submitting ? 'Creando...' : 'Crear ticket'}
           </button>
