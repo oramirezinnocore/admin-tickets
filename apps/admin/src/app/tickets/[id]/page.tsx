@@ -41,6 +41,7 @@ interface TechnicianLocation {
 }
 
 type LocationStatus = 'online' | 'recent' | 'stale';
+type DataVerificationState = 'loading' | 'present' | 'absent' | 'error';
 
 function getLocationStatus(recordedAt: string): LocationStatus {
   const now = new Date();
@@ -100,8 +101,8 @@ export default function TicketDetailPage() {
   const [ticket, setTicket] = useState<TicketWithRelations | null>(null);
   const [history, setHistory] = useState<TicketStatusHistory[]>([]);
   const [techLocation, setTechLocation] = useState<TechnicianLocation | null>(null);
-  const [hasEvidence, setHasEvidence] = useState(false);
-  const [hasSignature, setHasSignature] = useState(false);
+  const [evidenceState, setEvidenceState] = useState<DataVerificationState>('loading');
+  const [signatureState, setSignatureState] = useState<DataVerificationState>('loading');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
@@ -186,15 +187,27 @@ export default function TicketDetailPage() {
   }
 
   async function loadEvidenceAndSignature() {
+    // Store current ticketId to prevent race conditions
+    const currentTicketId = ticketId;
+
+    // Set loading state
+    setEvidenceState('loading');
+    setSignatureState('loading');
+
     try {
       // Check for evidence
-      const { data: evidences, error: evidenceError } = await supabase
+      const { count: evidenceCount, error: evidenceError } = await supabase
         .from('ticket_evidences')
         .select('id', { count: 'exact', head: true })
         .eq('ticket_id', ticketId);
 
-      if (!evidenceError) {
-        setHasEvidence((evidences as any) > 0);
+      // Only update state if we're still on the same ticket
+      if (currentTicketId === ticketId) {
+        if (evidenceError) {
+          setEvidenceState('error');
+        } else {
+          setEvidenceState(evidenceCount && evidenceCount > 0 ? 'present' : 'absent');
+        }
       }
 
       // Check for signature
@@ -204,11 +217,21 @@ export default function TicketDetailPage() {
         .eq('ticket_id', ticketId)
         .maybeSingle();
 
-      if (!signatureError) {
-        setHasSignature(!!signature);
+      // Only update state if we're still on the same ticket
+      if (currentTicketId === ticketId) {
+        if (signatureError) {
+          setSignatureState('error');
+        } else {
+          setSignatureState(signature ? 'present' : 'absent');
+        }
       }
     } catch (err: any) {
       console.error('Error loading evidence and signature:', err);
+      // Only update state if we're still on the same ticket
+      if (currentTicketId === ticketId) {
+        setEvidenceState('error');
+        setSignatureState('error');
+      }
     }
   }
 
@@ -466,8 +489,12 @@ export default function TicketDetailPage() {
           {/* Ticket Journey */}
           <TicketJourney
             ticket={ticket}
-            hasEvidence={hasEvidence}
-            hasSignature={hasSignature}
+            hasEvidence={evidenceState === 'present'}
+            hasSignature={signatureState === 'present'}
+            evidenceLoading={evidenceState === 'loading'}
+            signatureLoading={signatureState === 'loading'}
+            evidenceError={evidenceState === 'error'}
+            signatureError={signatureState === 'error'}
           />
 
           {/* Ticket Information */}

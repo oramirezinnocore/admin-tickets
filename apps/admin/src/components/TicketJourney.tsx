@@ -17,9 +17,22 @@ interface TicketJourneyProps {
   compact?: boolean;
   hasEvidence?: boolean;
   hasSignature?: boolean;
+  evidenceLoading?: boolean;
+  signatureLoading?: boolean;
+  evidenceError?: boolean;
+  signatureError?: boolean;
 }
 
-export default function TicketJourney({ ticket, compact = false, hasEvidence = false, hasSignature = false }: TicketJourneyProps) {
+export default function TicketJourney({
+  ticket,
+  compact = false,
+  hasEvidence = false,
+  hasSignature = false,
+  evidenceLoading = false,
+  signatureLoading = false,
+  evidenceError = false,
+  signatureError = false
+}: TicketJourneyProps) {
   const steps: JourneyStep[] = [
     {
       id: 'created',
@@ -50,14 +63,14 @@ export default function TicketJourney({ ticket, compact = false, hasEvidence = f
       label: 'Evidencia',
       icon: Image,
       status: hasEvidence ? 'completed' : ticket.status === 'CANCELLED' ? 'cancelled' : 'pending',
-      description: hasEvidence ? 'Fotografías adjuntas' : 'Sin fotografías'
+      description: evidenceError ? 'No se pudo verificar' : evidenceLoading ? 'Verificando...' : hasEvidence ? 'Fotografías adjuntas' : 'Sin fotografías'
     },
     {
       id: 'signature',
       label: 'Firma',
       icon: PenTool,
       status: hasSignature ? 'completed' : ticket.status === 'CANCELLED' ? 'cancelled' : 'pending',
-      description: hasSignature ? 'Firmado por cliente' : 'Sin firma'
+      description: signatureError ? 'No se pudo verificar' : signatureLoading ? 'Verificando...' : hasSignature ? 'Firmado por cliente' : 'Sin firma'
     },
     {
       id: 'closed',
