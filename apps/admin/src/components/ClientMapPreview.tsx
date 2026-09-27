@@ -14,33 +14,76 @@ interface ClientMapPreviewProps {
 export default function ClientMapPreview({ latitude, longitude, clientName }: ClientMapPreviewProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
-  const initAttemptedRef = useRef(false);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    let mapInitialized = false;
+
+    console.log('[ClientMapPreview] Component mounted', { latitude, longitude });
 
     const initMap = async () => {
-      if (cancelled) return;
-      if (mapRef.current) return;
-      if (!mapContainerRef.current) return;
-
-      // Verify container has valid dimensions before initializing
-      const rect = mapContainerRef.current.getBoundingClientRect();
-      if (rect.width < 50 || rect.height < 50) {
-        console.warn('[ClientMapPreview] Container has invalid dimensions:', rect);
+      if (cancelled) {
+        console.log('[ClientMapPreview] Init cancelled before start');
+        return;
+      }
+      if (mapRef.current) {
+        console.log('[ClientMapPreview] Map already exists');
+        return;
+      }
+      if (!mapContainerRef.current) {
+        console.log('[ClientMapPreview] Container ref not available');
+        return;
+      }
+      if (mapInitialized) {
+        console.log('[ClientMapPreview] Map already initialized');
         return;
       }
 
-      if (initAttemptedRef.current) return;
-      initAttemptedRef.current = true;
+      // Verify container has valid dimensions before initializing
+      const rect = mapContainerRef.current.getBoundingClientRect();
+      console.log('[ClientMapPreview] Container dimensions:', {
+        width: rect.width,
+        height: rect.height,
+        top: rect.top,
+        left: rect.left
+      });
+
+      if (rect.width < 50 || rect.height < 50) {
+        console.warn('[ClientMapPreview] Container dimensions too small, retrying...');
+        // Retry after another delay
+        setTimeout(() => {
+          if (!cancelled && !mapInitialized) {
+            initMap();
+          }
+        }, 200);
+        return;
+      }
+
+      mapInitialized = true;
+      console.log('[ClientMapPreview] Starting map initialization...');
 
       try {
+        console.log('[ClientMapPreview] Loading MapLibre GL...');
         const maplibregl = await initMapLibre();
+        console.log('[ClientMapPreview] MapLibre GL loaded successfully');
 
-        if (cancelled) return;
-        if (!mapContainerRef.current) return;
+        if (cancelled) {
+          console.log('[ClientMapPreview] Cancelled after MapLibre load');
+          return;
+        }
+        if (!mapContainerRef.current) {
+          console.log('[ClientMapPreview] Container disappeared after MapLibre load');
+          return;
+        }
+
+        console.log('[ClientMapPreview] Creating map instance...', {
+          style: DEFAULT_MAP_STYLE,
+          center: [longitude, latitude],
+          zoom: 14
+        });
 
         const map = new (maplibregl as any).Map({
           container: mapContainerRef.current,
@@ -50,25 +93,47 @@ export default function ClientMapPreview({ latitude, longitude, clientName }: Cl
           interactive: false,
         });
 
+        console.log('[ClientMapPreview] Map instance created');
+
         map.on('load', () => {
-          if (cancelled) return;
+          console.log('[ClientMapPreview] Map load event fired');
+          if (cancelled) {
+            console.log('[ClientMapPreview] Cancelled in load event');
+            return;
+          }
 
           // Ensure map is properly sized
           requestAnimationFrame(() => {
             if (mapContainerRef.current && !cancelled) {
               const rect = mapContainerRef.current.getBoundingClientRect();
+              console.log('[ClientMapPreview] Resizing map to:', {
+                width: rect.width,
+                height: rect.height
+              });
               if (rect.width > 0 && rect.height > 0) {
                 map.resize();
+                console.log('[ClientMapPreview] Map resized');
               }
             }
           });
 
+          console.log('[ClientMapPreview] Setting loading to false');
           setLoading(false);
 
           // Add marker
+          console.log('[ClientMapPreview] Adding marker at:', [longitude, latitude]);
           new (maplibregl as any).Marker({ color: '#3B82F6' })
             .setLngLat([longitude, latitude])
             .addTo(map);
+          console.log('[ClientMapPreview] Marker added');
+        });
+
+        map.on('style.load', () => {
+          console.log('[ClientMapPreview] Style loaded');
+        });
+
+        map.on('idle', () => {
+          console.log('[ClientMapPreview] Map idle');
         });
 
         map.on('error', (e: any) => {
@@ -80,6 +145,7 @@ export default function ClientMapPreview({ latitude, longitude, clientName }: Cl
         });
 
         mapRef.current = map;
+        console.log('[ClientMapPreview] Map ref stored');
       } catch (err) {
         console.error('[ClientMapPreview] Initialization error:', err);
         if (!cancelled) {
@@ -89,17 +155,42 @@ export default function ClientMapPreview({ latitude, longitude, clientName }: Cl
       }
     };
 
-    // Small delay to ensure DOM is fully rendered
-    const timeoutId = setTimeout(initMap, 100);
+    // Use ResizeObserver to wait for valid dimensions
+    if (mapContainerRef.current) {
+      resizeObserverRef.current = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const { width, height } = entry.contentRect;
+          console.log('[ClientMapPreview] ResizeObserver:', { width, height });
+          if (width > 0 && height > 0 && !mapInitialized && !mapRef.current) {
+            console.log('[ClientMapPreview] Valid dimensions detected, initializing map');
+            initMap();
+          }
+        }
+      });
+      resizeObserverRef.current.observe(mapContainerRef.current);
+    }
+
+    // Fallback: also try after delay
+    const timeoutId = setTimeout(() => {
+      if (!mapInitialized && !mapRef.current) {
+        console.log('[ClientMapPreview] Timeout fallback triggered');
+        initMap();
+      }
+    }, 100);
 
     return () => {
+      console.log('[ClientMapPreview] Component unmounting');
       cancelled = true;
       clearTimeout(timeoutId);
+      if (resizeObserverRef.current) {
+        resizeObserverRef.current.disconnect();
+        resizeObserverRef.current = null;
+      }
       if (mapRef.current) {
+        console.log('[ClientMapPreview] Removing map');
         mapRef.current.remove();
         mapRef.current = null;
       }
-      initAttemptedRef.current = false;
     };
   }, [latitude, longitude]);
 
