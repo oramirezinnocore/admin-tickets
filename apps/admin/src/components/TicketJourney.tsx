@@ -1,6 +1,7 @@
 'use client';
 
-import { CheckCircle, Circle, Clock, FileText, Image, PenTool, XCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { CheckCircle, Circle, Clock, FileText, Image, PenTool, XCircle, AlertCircle } from 'lucide-react';
 import { Ticket } from '@wisper/shared';
 
 interface JourneyStep {
@@ -10,6 +11,7 @@ interface JourneyStep {
   status: 'completed' | 'current' | 'pending' | 'cancelled';
   timestamp?: string;
   description?: string;
+  details?: string[];
 }
 
 interface TicketJourneyProps {
@@ -33,6 +35,8 @@ export default function TicketJourney({
   evidenceError = false,
   signatureError = false
 }: TicketJourneyProps) {
+  const [selectedStepId, setSelectedStepId] = useState<string>('created');
+
   const steps: JourneyStep[] = [
     {
       id: 'created',
@@ -40,15 +44,27 @@ export default function TicketJourney({
       icon: FileText,
       status: 'completed',
       timestamp: ticket.created_at,
-      description: 'Ticket reportado'
+      description: 'Ticket reportado',
+      details: [
+        `Fecha: ${new Date(ticket.created_at).toLocaleString('es-MX', {
+          dateStyle: 'medium',
+          timeStyle: 'short'
+        })}`,
+        ticket.failure_type ? `Tipo de falla: ${ticket.failure_type}` : undefined,
+      ].filter(Boolean) as string[]
     },
     {
       id: 'assigned',
       label: 'Asignado',
       icon: Clock,
       status: ticket.technician_id ? 'completed' : 'pending',
-      timestamp: ticket.created_at, // Note: No explicit assignment timestamp in schema
-      description: ticket.technician_id ? 'Técnico asignado' : 'Pendiente de asignación'
+      timestamp: ticket.assigned_at || undefined,
+      description: ticket.technician_id ? 'Técnico asignado' : 'Pendiente de asignación',
+      details: ticket.technician_id ? [
+        ticket.assigned_at
+          ? `Fecha: ${new Date(ticket.assigned_at).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })}`
+          : 'Fecha de asignación no disponible',
+      ] : ['El ticket aún no ha sido asignado a un técnico']
     },
     {
       id: 'started',
@@ -56,21 +72,50 @@ export default function TicketJourney({
       icon: Clock,
       status: ticket.started_at ? 'completed' : ticket.status === 'CANCELLED' ? 'cancelled' : 'pending',
       timestamp: ticket.started_at || undefined,
-      description: ticket.started_at ? 'Atención iniciada' : 'Pendiente de inicio'
+      description: ticket.started_at ? 'Atención iniciada' : 'Pendiente de inicio',
+      details: ticket.started_at ? [
+        `Fecha: ${new Date(ticket.started_at).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })}`
+      ] : ['El técnico aún no ha iniciado la atención']
     },
     {
       id: 'evidence',
       label: 'Evidencia',
       icon: Image,
       status: hasEvidence ? 'completed' : ticket.status === 'CANCELLED' ? 'cancelled' : 'pending',
-      description: evidenceError ? 'No se pudo verificar' : evidenceLoading ? 'Verificando...' : hasEvidence ? 'Fotografías adjuntas' : 'Sin fotografías'
+      description: evidenceError
+        ? 'No se pudo verificar'
+        : evidenceLoading
+        ? 'Verificando...'
+        : hasEvidence
+        ? 'Fotografías adjuntas'
+        : 'Sin fotografías',
+      details: evidenceError
+        ? ['Ocurrió un error al consultar las evidencias', 'Intenta recargar la página']
+        : evidenceLoading
+        ? ['Consultando evidencias en la base de datos...']
+        : hasEvidence
+        ? ['El técnico adjuntó fotografías del trabajo', 'Visible en la bitácora del ticket']
+        : ['No se han adjuntado fotografías todavía']
     },
     {
       id: 'signature',
       label: 'Firma',
       icon: PenTool,
       status: hasSignature ? 'completed' : ticket.status === 'CANCELLED' ? 'cancelled' : 'pending',
-      description: signatureError ? 'No se pudo verificar' : signatureLoading ? 'Verificando...' : hasSignature ? 'Firmado por cliente' : 'Sin firma'
+      description: signatureError
+        ? 'No se pudo verificar'
+        : signatureLoading
+        ? 'Verificando...'
+        : hasSignature
+        ? 'Firmado por cliente'
+        : 'Sin firma',
+      details: signatureError
+        ? ['Ocurrió un error al consultar la firma', 'Intenta recargar la página']
+        : signatureLoading
+        ? ['Consultando firma en la base de datos...']
+        : hasSignature
+        ? ['El cliente firmó la orden de servicio', 'Visible en la bitácora del ticket']
+        : ['El cliente aún no ha firmado la orden']
     },
     {
       id: 'closed',
@@ -78,10 +123,56 @@ export default function TicketJourney({
       icon: ticket.status === 'CANCELLED' ? XCircle : CheckCircle,
       status: ticket.status === 'RESOLVED' ? 'completed' : ticket.status === 'CANCELLED' ? 'cancelled' : 'pending',
       timestamp: ticket.closed_at || undefined,
-      description: ticket.status === 'RESOLVED' ? 'Ticket completado' : ticket.status === 'CANCELLED' ? 'Ticket cancelado' : 'Pendiente de cierre'
+      description: ticket.status === 'RESOLVED'
+        ? 'Ticket completado'
+        : ticket.status === 'CANCELLED'
+        ? 'Ticket cancelado'
+        : 'Pendiente de cierre',
+      details: ticket.status === 'RESOLVED' || ticket.status === 'CANCELLED' ? [
+        ticket.closed_at
+          ? `Fecha: ${new Date(ticket.closed_at).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })}`
+          : 'Fecha de cierre no disponible',
+        ticket.close_reason ? `Razón: ${ticket.close_reason}` : undefined,
+        ticket.solution_text ? `Solución: ${ticket.solution_text}` : undefined
+      ].filter(Boolean) as string[] : ['El ticket aún no ha sido cerrado']
     }
   ];
 
+  // Auto-select first non-pending step or 'created' on mount
+  useEffect(() => {
+    const firstActiveStep = steps.find(s => s.status === 'current') ||
+                            steps.find(s => s.status === 'completed') ||
+                            steps[0];
+    setSelectedStepId(firstActiveStep.id);
+  }, []);
+
+  // Keyboard navigation
+  const handleKeyDown = (e: React.KeyboardEvent, stepId: string) => {
+    const currentIndex = steps.findIndex(s => s.id === stepId);
+
+    if (e.key === 'ArrowLeft' && currentIndex > 0) {
+      e.preventDefault();
+      const prevStep = steps[currentIndex - 1];
+      setSelectedStepId(prevStep.id);
+      // Focus the previous button
+      const prevButton = document.querySelector(`[data-step-id="${prevStep.id}"]`) as HTMLButtonElement;
+      prevButton?.focus();
+    } else if (e.key === 'ArrowRight' && currentIndex < steps.length - 1) {
+      e.preventDefault();
+      const nextStep = steps[currentIndex + 1];
+      setSelectedStepId(nextStep.id);
+      // Focus the next button
+      const nextButton = document.querySelector(`[data-step-id="${nextStep.id}"]`) as HTMLButtonElement;
+      nextButton?.focus();
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      setSelectedStepId(stepId);
+    }
+  };
+
+  const selectedStep = steps.find(s => s.id === selectedStepId) || steps[0];
+
+  // Compact mode: horizontal icons only (preserved for backward compatibility)
   if (compact) {
     return (
       <div className="flex items-center gap-2">
@@ -117,69 +208,172 @@ export default function TicketJourney({
     );
   }
 
+  // Full interactive horizontal journey
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-6">
-      <h3 className="text-lg font-semibold text-gray-900 mb-6">Progreso del Ticket</h3>
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      {/* Header */}
+      <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
+        <h3 className="text-sm font-semibold text-gray-900">Progreso del Ticket</h3>
+      </div>
 
-      <div className="relative">
-        {/* Vertical line */}
-        <div className="absolute left-6 top-6 bottom-6 w-0.5 bg-gray-200" />
-
-        {/* Steps */}
-        <div className="space-y-6">
+      {/* Horizontal Steps */}
+      <div className="px-4 py-6">
+        <div
+          className="flex items-center justify-between gap-2 md:gap-4 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100"
+          role="tablist"
+          aria-label="Etapas del ticket"
+        >
           {steps.map((step, index) => {
             const Icon = step.icon;
+            const isSelected = selectedStepId === step.id;
+            const isCompleted = step.status === 'completed';
+            const isCancelled = step.status === 'cancelled';
+            const isPending = step.status === 'pending';
             const isLast = index === steps.length - 1;
 
-            return (
-              <div key={step.id} className="relative flex items-start gap-4">
-                {/* Icon */}
-                <div
-                  className={`relative z-10 flex items-center justify-center w-12 h-12 rounded-full border-4 border-white transition-all ${
-                    step.status === 'completed'
-                      ? 'bg-green-100 text-green-600 shadow-sm'
-                      : step.status === 'cancelled'
-                      ? 'bg-red-100 text-red-600 shadow-sm'
-                      : step.status === 'current'
-                      ? 'bg-blue-100 text-blue-600 shadow-sm ring-4 ring-blue-50'
-                      : 'bg-gray-100 text-gray-400'
-                  }`}
-                >
-                  <Icon className="h-5 w-5" />
-                </div>
+            // Status icon for evidence and signature loading/error states
+            let StatusIcon: React.ElementType | null = null;
+            if (step.id === 'evidence' || step.id === 'signature') {
+              if (step.id === 'evidence' && evidenceLoading) {
+                StatusIcon = Clock;
+              } else if (step.id === 'evidence' && evidenceError) {
+                StatusIcon = AlertCircle;
+              } else if (step.id === 'signature' && signatureLoading) {
+                StatusIcon = Clock;
+              } else if (step.id === 'signature' && signatureError) {
+                StatusIcon = AlertCircle;
+              }
+            }
 
-                {/* Content */}
-                <div className="flex-1 pt-2">
-                  <div className="flex items-center justify-between mb-1">
-                    <h4 className={`text-sm font-semibold ${
-                      step.status === 'completed'
-                        ? 'text-gray-900'
-                        : step.status === 'cancelled'
-                        ? 'text-red-700'
-                        : step.status === 'current'
-                        ? 'text-blue-700'
-                        : 'text-gray-500'
-                    }`}>
-                      {step.label}
-                    </h4>
-                    {step.timestamp && (
-                      <span className="text-xs text-gray-500">
-                        {new Date(step.timestamp).toLocaleString('es-MX', {
-                          day: '2-digit',
-                          month: 'short',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
-                      </span>
+            return (
+              <div key={step.id} className="flex items-center flex-shrink-0">
+                {/* Step Button */}
+                <button
+                  data-step-id={step.id}
+                  role="tab"
+                  aria-selected={isSelected}
+                  aria-controls={`panel-${step.id}`}
+                  onClick={() => setSelectedStepId(step.id)}
+                  onKeyDown={(e) => handleKeyDown(e, step.id)}
+                  className={`
+                    group flex flex-col items-center gap-2 px-2 py-2 rounded-lg transition-all duration-200
+                    focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
+                    motion-reduce:transition-none
+                    ${isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'}
+                  `}
+                >
+                  {/* Icon Circle */}
+                  <div className="relative">
+                    <div
+                      className={`
+                        relative z-10 flex items-center justify-center w-10 h-10 md:w-12 md:h-12 rounded-full border-2 transition-all duration-200
+                        motion-reduce:transition-none
+                        ${isCompleted
+                          ? 'bg-green-100 text-green-600 border-green-300'
+                          : isCancelled
+                          ? 'bg-red-100 text-red-600 border-red-300'
+                          : isPending
+                          ? 'bg-gray-100 text-gray-400 border-gray-300'
+                          : 'bg-blue-100 text-blue-600 border-blue-300'
+                        }
+                        ${isSelected ? 'ring-2 ring-blue-400 ring-offset-2' : ''}
+                      `}
+                    >
+                      <Icon className="h-4 w-4 md:h-5 md:h-5" />
+                    </div>
+
+                    {/* Loading/Error Badge */}
+                    {StatusIcon && (
+                      <div className={`
+                        absolute -top-1 -right-1 flex items-center justify-center w-5 h-5 rounded-full border-2 border-white
+                        ${(evidenceLoading || signatureLoading) ? 'bg-yellow-100 text-yellow-600' : 'bg-red-100 text-red-600'}
+                      `}>
+                        <StatusIcon className="h-3 w-3" />
+                      </div>
                     )}
                   </div>
-                  {step.description && (
-                    <p className="text-sm text-gray-600">{step.description}</p>
+
+                  {/* Label */}
+                  <span className={`
+                    text-xs md:text-sm font-medium whitespace-nowrap transition-colors duration-200
+                    ${isCompleted ? 'text-gray-900' : isCancelled ? 'text-red-700' : isPending ? 'text-gray-500' : 'text-blue-700'}
+                    ${isSelected ? 'font-semibold' : ''}
+                  `}>
+                    {step.label}
+                  </span>
+
+                  {/* Timestamp (optional, only if completed) */}
+                  {step.timestamp && !isPending && (
+                    <span className="text-xs text-gray-500 whitespace-nowrap hidden md:block">
+                      {new Date(step.timestamp).toLocaleDateString('es-MX', {
+                        day: '2-digit',
+                        month: 'short'
+                      })}
+                    </span>
                   )}
-                </div>
+                </button>
+
+                {/* Connector Line */}
+                {!isLast && (
+                  <div
+                    className={`
+                      h-0.5 w-4 md:w-8 flex-shrink-0 transition-colors duration-200
+                      motion-reduce:transition-none
+                      ${isCompleted ? 'bg-green-300' : 'bg-gray-300'}
+                    `}
+                  />
+                )}
               </div>
             );
           })}
+        </div>
+      </div>
+
+      {/* Context Panel */}
+      <div
+        id={`panel-${selectedStep.id}`}
+        role="tabpanel"
+        aria-labelledby={`tab-${selectedStep.id}`}
+        className="px-4 pb-4"
+      >
+        <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 transition-all duration-200 motion-reduce:transition-none">
+          {/* Panel Header */}
+          <div className="flex items-start gap-3 mb-3">
+            <div className={`
+              flex-shrink-0 p-2 rounded-lg
+              ${selectedStep.status === 'completed'
+                ? 'bg-green-100 text-green-600'
+                : selectedStep.status === 'cancelled'
+                ? 'bg-red-100 text-red-600'
+                : 'bg-gray-200 text-gray-600'
+              }
+            `}>
+              {(() => {
+                const StepIcon = selectedStep.icon;
+                return <StepIcon className="h-5 w-5" />;
+              })()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <h4 className="text-sm font-semibold text-gray-900 mb-1">
+                {selectedStep.label}
+              </h4>
+              <p className="text-sm text-gray-600">
+                {selectedStep.description}
+              </p>
+            </div>
+          </div>
+
+          {/* Panel Details */}
+          {selectedStep.details && selectedStep.details.length > 0 && (
+            <div className="space-y-1.5">
+              {selectedStep.details.map((detail, idx) => (
+                <div key={idx} className="flex items-start gap-2 text-sm text-gray-700">
+                  <Circle className="h-1.5 w-1.5 mt-1.5 flex-shrink-0 fill-current text-gray-400" />
+                  <span>{detail}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
