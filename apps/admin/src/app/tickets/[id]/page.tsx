@@ -28,6 +28,9 @@ import {
 import TicketActivityTimeline from '@/components/TicketActivity';
 import TicketJourney from '@/components/TicketJourney';
 import SlaProgressBanner from '@/components/SlaProgressBanner';
+import TicketTimesCard from '@/components/TicketTimesCard';
+import TicketInformationCard from '@/components/TicketInformationCard';
+import TicketClientCard from '@/components/TicketClientCard';
 
 interface TicketWithRelations extends Ticket {
   client: Client;
@@ -512,129 +515,10 @@ export default function TicketDetailPage() {
           />
 
           {/* Ticket Information */}
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold mb-4">Información del ticket</h2>
-
-            {(ticket.admin_notes || ticket.technician_notes || ticket.solution_text || ticket.close_reason) && (
-              <div className="space-y-4">
-                {ticket.admin_notes && (
-                  <div>
-                    <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Observaciones</dt>
-                    <dd className="text-sm text-gray-900 whitespace-pre-wrap">{ticket.admin_notes}</dd>
-                  </div>
-                )}
-                {ticket.technician_notes && (
-                  <div>
-                    <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Notas del técnico</dt>
-                    <dd className="text-sm text-gray-900 whitespace-pre-wrap">{ticket.technician_notes}</dd>
-                  </div>
-                )}
-                {ticket.solution_text && (
-                  <div>
-                    <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Solución</dt>
-                    <dd className="text-sm text-gray-900 whitespace-pre-wrap">{ticket.solution_text}</dd>
-                  </div>
-                )}
-                {ticket.close_reason && (
-                  <div>
-                    <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Razón de cierre</dt>
-                    <dd className="text-sm text-gray-900">{ticket.close_reason}</dd>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {!ticket.admin_notes && !ticket.technician_notes && !ticket.solution_text && !ticket.close_reason && (
-              <p className="text-sm text-gray-500">Sin información adicional</p>
-            )}
-          </div>
+          <TicketInformationCard ticket={ticket} />
 
           {/* Cliente */}
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold mb-4">Cliente</h2>
-
-            <div className="space-y-3">
-              <div>
-                <p className="font-medium text-gray-900">{ticket.client?.name}</p>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                {ticket.client?.phone && (
-                  <div>
-                    <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Teléfono</dt>
-                    <dd className="text-gray-900">
-                      <a href={`tel:${ticket.client.phone}`} className="hover:text-blue-600">
-                        {ticket.client.phone}
-                      </a>
-                    </dd>
-                  </div>
-                )}
-
-                <div className="sm:col-span-2">
-                  <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Dirección</dt>
-                  <dd className="text-gray-900">{ticket.client?.address}</dd>
-                </div>
-              </div>
-
-              {ticket.client?.reference && (
-                <div>
-                  <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Referencia</dt>
-                  <dd className="text-sm text-gray-900">{ticket.client.reference}</dd>
-                </div>
-              )}
-
-              {hasValidCoordinates(ticket.client?.latitude, ticket.client?.longitude) ? (
-                <div className="space-y-2">
-                  <ClientMapPreview
-                    latitude={ticket.client!.latitude!}
-                    longitude={ticket.client!.longitude!}
-                    clientName={ticket.client?.name}
-                  />
-                  <button
-                    onClick={() => openInMaps(ticket.client!.latitude!, ticket.client!.longitude!)}
-                    className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-                  >
-                    Abrir en el mapa →
-                  </button>
-                </div>
-              ) : (
-                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                  <div className="flex items-start gap-3">
-                    <svg
-                      className="w-5 h-5 text-gray-400 flex-shrink-0 mt-0.5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
-                      />
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
-                      />
-                    </svg>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-gray-600 mb-2">Ubicación no disponible</p>
-                      {ticket.client?.address && (
-                        <button
-                          onClick={() => searchAddressInGoogleMaps(ticket.client!.address)}
-                          className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-                        >
-                          Buscar dirección en Google Maps →
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+          <TicketClientCard client={ticket.client} />
         </div>
 
         {/* Sidebar */}
@@ -703,85 +587,7 @@ export default function TicketDetailPage() {
           </div>
 
           {/* Tiempos */}
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold mb-4">Tiempos</h2>
-
-            <div className="space-y-4">
-              <div className="text-center">
-                <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Antigüedad total</dt>
-                <dd className="text-2xl font-bold text-gray-900">{formatTicketAge(ticket.created_at)}</dd>
-              </div>
-
-              {/* Service Time Metrics */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-gray-200">
-                <div className="text-center">
-                  <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Tiempo hasta atención</dt>
-                  <dd className="text-lg font-semibold text-gray-900">{formatTimeToAttention(ticket.created_at, ticket.started_at)}</dd>
-                  <p className="text-xs text-gray-500 mt-1">Creación → Inicio</p>
-                </div>
-
-                <div className="text-center">
-                  <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Tiempo de atención</dt>
-                  <dd className="text-lg font-semibold text-gray-900">{formatAttentionTime(ticket.started_at, ticket.closed_at)}</dd>
-                  <p className="text-xs text-gray-500 mt-1">Inicio → Cierre</p>
-                </div>
-
-                <div className="text-center">
-                  <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Tiempo total del ticket</dt>
-                  <dd className="text-lg font-semibold text-gray-900">{formatTotalTicketTime(ticket.created_at, ticket.closed_at)}</dd>
-                  <p className="text-xs text-gray-500 mt-1">Creación → Cierre</p>
-                </div>
-              </div>
-
-              <div className="relative">
-                <div className="absolute left-1/2 top-0 bottom-0 w-0.5 bg-gray-200 -translate-x-1/2"></div>
-
-                <div className="relative space-y-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1 text-right">
-                      <dt className="text-xs font-medium text-gray-500">Creado</dt>
-                      <dd className="text-xs text-gray-900">{new Date(ticket.created_at).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })}</dd>
-                    </div>
-                    <div className="w-3 h-3 rounded-full bg-blue-600 border-4 border-white shadow z-10"></div>
-                    <div className="flex-1"></div>
-                  </div>
-
-                  {ticket.assigned_at && (
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1 text-right">
-                        <dt className="text-xs font-medium text-gray-500">Asignado</dt>
-                        <dd className="text-xs text-gray-900">{new Date(ticket.assigned_at).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })}</dd>
-                      </div>
-                      <div className="w-2 h-2 rounded-full bg-gray-400 border-2 border-white shadow z-10"></div>
-                      <div className="flex-1"></div>
-                    </div>
-                  )}
-
-                  {ticket.started_at && (
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1 text-right">
-                        <dt className="text-xs font-medium text-gray-500">Iniciado</dt>
-                        <dd className="text-xs text-gray-900">{new Date(ticket.started_at).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })}</dd>
-                      </div>
-                      <div className="w-2 h-2 rounded-full bg-gray-400 border-2 border-white shadow z-10"></div>
-                      <div className="flex-1"></div>
-                    </div>
-                  )}
-
-                  {ticket.closed_at && (
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1 text-right">
-                        <dt className="text-xs font-medium text-gray-500">Cerrado</dt>
-                        <dd className="text-xs text-gray-900">{new Date(ticket.closed_at).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })}</dd>
-                      </div>
-                      <div className={`w-3 h-3 rounded-full border-4 border-white shadow z-10 ${ticket.status === 'RESOLVED' ? 'bg-green-600' : 'bg-red-600'}`}></div>
-                      <div className="flex-1"></div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
+          <TicketTimesCard ticket={ticket} />
 
           {/* Línea de tiempo */}
           {history.length > 0 && (
