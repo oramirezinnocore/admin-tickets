@@ -219,7 +219,7 @@ export default function TicketJourney({
       {/* Horizontal Steps */}
       <div className="px-4 py-6">
         <div
-          className="flex items-center justify-between gap-2 md:gap-4 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100"
+          className="flex items-center justify-start gap-1 md:gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100"
           role="tablist"
           aria-label="Etapas del ticket"
         >
@@ -246,7 +246,7 @@ export default function TicketJourney({
             }
 
             return (
-              <div key={step.id} className="flex items-center flex-shrink-0">
+              <div key={step.id} className="flex items-center">
                 {/* Step Button */}
                 <button
                   data-step-id={step.id}
@@ -256,8 +256,8 @@ export default function TicketJourney({
                   onClick={() => setSelectedStepId(step.id)}
                   onKeyDown={(e) => handleKeyDown(e, step.id)}
                   className={`
-                    group flex flex-col items-center gap-2 px-2 py-2 rounded-lg transition-all duration-200
-                    focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
+                    group flex flex-col items-center gap-1.5 px-1 py-1.5 md:px-1.5 md:py-2 rounded-lg transition-all duration-200
+                    focus:outline-none focus:ring-2 focus:ring-blue-500
                     motion-reduce:transition-none
                     ${isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'}
                   `}
@@ -266,29 +266,29 @@ export default function TicketJourney({
                   <div className="relative">
                     <div
                       className={`
-                        relative z-10 flex items-center justify-center w-10 h-10 md:w-12 md:h-12 rounded-full border-2 transition-all duration-200
+                        relative z-10 flex items-center justify-center w-8 h-8 md:w-9 md:h-9 rounded-full transition-all duration-200
                         motion-reduce:transition-none
                         ${isCompleted
-                          ? 'bg-green-100 text-green-600 border-green-300'
+                          ? 'bg-green-100 text-green-600 border-2 border-green-400'
                           : isCancelled
-                          ? 'bg-red-100 text-red-600 border-red-300'
+                          ? 'bg-red-100 text-red-600 border-2 border-red-400'
                           : isPending
-                          ? 'bg-gray-100 text-gray-400 border-gray-300'
-                          : 'bg-blue-100 text-blue-600 border-blue-300'
+                          ? 'bg-gray-100 text-gray-400 border-2 border-gray-300'
+                          : 'bg-blue-100 text-blue-600 border-2 border-blue-400'
                         }
-                        ${isSelected ? 'ring-2 ring-blue-400 ring-offset-2' : ''}
+                        ${isSelected ? 'border-blue-500 shadow-sm' : ''}
                       `}
                     >
-                      <Icon className="h-4 w-4 md:h-5 md:h-5" />
+                      <Icon className="h-3.5 w-3.5 md:h-4 md:w-4" />
                     </div>
 
                     {/* Loading/Error Badge */}
                     {StatusIcon && (
                       <div className={`
-                        absolute -top-1 -right-1 flex items-center justify-center w-5 h-5 rounded-full border-2 border-white
+                        absolute -top-0.5 -right-0.5 flex items-center justify-center w-4 h-4 rounded-full border border-white
                         ${(evidenceLoading || signatureLoading) ? 'bg-yellow-100 text-yellow-600' : 'bg-red-100 text-red-600'}
                       `}>
-                        <StatusIcon className="h-3 w-3" />
+                        <StatusIcon className="h-2.5 w-2.5" />
                       </div>
                     )}
                   </div>
@@ -317,7 +317,7 @@ export default function TicketJourney({
                 {!isLast && (
                   <div
                     className={`
-                      h-0.5 w-4 md:w-8 flex-shrink-0 transition-colors duration-200
+                      h-0.5 w-3 md:w-4 transition-colors duration-200
                       motion-reduce:transition-none
                       ${isCompleted ? 'bg-green-300' : 'bg-gray-300'}
                     `}
