@@ -15,9 +15,11 @@ interface JourneyStep {
 interface TicketJourneyProps {
   ticket: Ticket;
   compact?: boolean;
+  hasEvidence?: boolean;
+  hasSignature?: boolean;
 }
 
-export default function TicketJourney({ ticket, compact = false }: TicketJourneyProps) {
+export default function TicketJourney({ ticket, compact = false, hasEvidence = false, hasSignature = false }: TicketJourneyProps) {
   const steps: JourneyStep[] = [
     {
       id: 'created',
@@ -47,15 +49,15 @@ export default function TicketJourney({ ticket, compact = false }: TicketJourney
       id: 'evidence',
       label: 'Evidencia',
       icon: Image,
-      status: ticket.status === 'RESOLVED' || ticket.status === 'IN_REVIEW' ? 'completed' : ticket.status === 'CANCELLED' ? 'cancelled' : 'pending',
-      description: 'Fotografías'
+      status: hasEvidence ? 'completed' : ticket.status === 'CANCELLED' ? 'cancelled' : 'pending',
+      description: hasEvidence ? 'Fotografías adjuntas' : 'Sin fotografías'
     },
     {
       id: 'signature',
       label: 'Firma',
       icon: PenTool,
-      status: ticket.status === 'RESOLVED' || ticket.status === 'IN_REVIEW' ? 'completed' : ticket.status === 'CANCELLED' ? 'cancelled' : 'pending',
-      description: 'Cliente'
+      status: hasSignature ? 'completed' : ticket.status === 'CANCELLED' ? 'cancelled' : 'pending',
+      description: hasSignature ? 'Firmado por cliente' : 'Sin firma'
     },
     {
       id: 'closed',

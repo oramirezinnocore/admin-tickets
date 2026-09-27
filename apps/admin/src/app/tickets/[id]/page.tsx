@@ -26,6 +26,7 @@ import {
   formatTotalTicketTime,
 } from '@wisper/shared';
 import TicketActivityTimeline from '@/components/TicketActivity';
+import TicketJourney from '@/components/TicketJourney';
 
 interface TicketWithRelations extends Ticket {
   client: Client;
@@ -99,6 +100,8 @@ export default function TicketDetailPage() {
   const [ticket, setTicket] = useState<TicketWithRelations | null>(null);
   const [history, setHistory] = useState<TicketStatusHistory[]>([]);
   const [techLocation, setTechLocation] = useState<TechnicianLocation | null>(null);
+  const [hasEvidence, setHasEvidence] = useState(false);
+  const [hasSignature, setHasSignature] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
@@ -110,6 +113,7 @@ export default function TicketDetailPage() {
   useEffect(() => {
     loadTicket();
     loadHistory();
+    loadEvidenceAndSignature();
 
     // Auto refresh SLA every 60 seconds
     const interval = setInterval(() => {
@@ -181,6 +185,33 @@ export default function TicketDetailPage() {
     }
   }
 
+  async function loadEvidenceAndSignature() {
+    try {
+      // Check for evidence
+      const { data: evidences, error: evidenceError } = await supabase
+        .from('ticket_evidences')
+        .select('id', { count: 'exact', head: true })
+        .eq('ticket_id', ticketId);
+
+      if (!evidenceError) {
+        setHasEvidence((evidences as any) > 0);
+      }
+
+      // Check for signature
+      const { data: signature, error: signatureError } = await supabase
+        .from('ticket_signatures')
+        .select('id')
+        .eq('ticket_id', ticketId)
+        .maybeSingle();
+
+      if (!signatureError) {
+        setHasSignature(!!signature);
+      }
+    } catch (err: any) {
+      console.error('Error loading evidence and signature:', err);
+    }
+  }
+
   async function handleUnassign() {
     if (!ticket) return;
 
@@ -197,6 +228,7 @@ export default function TicketDetailPage() {
       if (error) throw error;
       await loadTicket();
       await loadHistory();
+      await loadEvidenceAndSignature();
     } catch (err: any) {
       alert('Error: ' + err.message);
     }
@@ -273,6 +305,7 @@ export default function TicketDetailPage() {
       setIsResolveModalOpen(false);
       await loadTicket();
       await loadHistory();
+      await loadEvidenceAndSignature();
     } catch (error: any) {
       // Re-throw to let modal handle error display
       throw error;
@@ -429,6 +462,13 @@ export default function TicketDetailPage() {
         <div className="lg:col-span-2 space-y-6">
           {/* Bitácora del ticket */}
           <TicketActivityTimeline ticketId={ticketId} />
+
+          {/* Ticket Journey */}
+          <TicketJourney
+            ticket={ticket}
+            hasEvidence={hasEvidence}
+            hasSignature={hasSignature}
+          />
 
           {/* Ticket Information */}
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
