@@ -5,10 +5,13 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { canAccessBackOffice } from '@wisper/shared';
 import Sidebar from '@/components/Sidebar';
+import CommandPalette from '@/components/CommandPalette';
+import { useCommandPalette } from '@/hooks/useCommandPalette';
 
 export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { user, profile, loading, signOut } = useAuth();
+  const { isOpen, setIsOpen } = useCommandPalette();
 
   useEffect(() => {
     if (!loading) {
@@ -42,6 +45,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
           {children}
         </div>
       </main>
+      <CommandPalette isOpen={isOpen} onClose={() => setIsOpen(false)} />
     </div>
   );
 }

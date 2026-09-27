@@ -12,6 +12,7 @@ import LoadingSkeleton from '@/components/ui/LoadingSkeleton';
 import EmptyState from '@/components/ui/EmptyState';
 import SlidePanel from '@/components/ui/SlidePanel';
 import AttentionPanel from '@/components/AttentionPanel';
+import OperationalInsights from '@/components/OperationalInsights';
 import { supabase } from '@/lib/supabase';
 import {
   Ticket,
@@ -432,6 +433,14 @@ export default function DashboardPage() {
         <AttentionPanel
           tickets={tickets}
           onTicketClick={(id) => router.push(`/tickets/${id}`)}
+        />
+      </div>
+
+      {/* Operational Insights */}
+      <div className="mb-8">
+        <OperationalInsights
+          tickets={tickets}
+          onNavigate={(path) => router.push(path)}
         />
       </div>
 
