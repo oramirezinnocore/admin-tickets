@@ -427,7 +427,7 @@ export default function TicketDetailPage() {
       <div className="mb-6">
         <button
           onClick={() => router.push('/tickets')}
-          className="text-blue-600 hover:text-blue-800 mb-4 text-sm font-medium"
+          className="text-blue-600 hover:text-blue-800 mb-4 text-sm font-medium transition-colors duration-200 motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded-md px-2 py-1 -ml-2"
         >
           ← Volver a tickets
         </button>
@@ -452,7 +452,7 @@ export default function TicketDetailPage() {
             {canAssign() && (
               <button
                 onClick={() => setIsAssignModalOpen(true)}
-                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition"
+                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 hover:shadow-md transition-all duration-200 motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
               >
                 {ticket.technician_id ? 'Reasignar' : 'Asignar'}
               </button>
@@ -460,7 +460,7 @@ export default function TicketDetailPage() {
             {canUnassign() && (
               <button
                 onClick={() => setIsUnassignDialogOpen(true)}
-                className="px-4 py-2 bg-gray-200 text-gray-700 text-sm font-medium hover:bg-gray-300 rounded-md transition"
+                className="px-4 py-2 bg-gray-200 text-gray-700 text-sm font-medium hover:bg-gray-300 hover:shadow-md rounded-lg transition-all duration-200 motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2"
               >
                 Desasignar
               </button>
@@ -468,7 +468,7 @@ export default function TicketDetailPage() {
             {canResolve() && (
               <button
                 onClick={() => setIsResolveModalOpen(true)}
-                className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 transition"
+                className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 hover:shadow-md transition-all duration-200 motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
               >
                 Resolver
               </button>
@@ -476,7 +476,7 @@ export default function TicketDetailPage() {
             {canCancel() && (
               <button
                 onClick={() => setIsCancelModalOpen(true)}
-                className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-md hover:bg-red-700 transition"
+                className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 hover:shadow-md transition-all duration-200 motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
               >
                 Cancelar
               </button>
