@@ -27,6 +27,7 @@ import {
 } from '@wisper/shared';
 import TicketActivityTimeline from '@/components/TicketActivity';
 import TicketJourney from '@/components/TicketJourney';
+import SlaProgressBanner from '@/components/SlaProgressBanner';
 
 interface TicketWithRelations extends Ticket {
   client: Client;
@@ -482,6 +483,14 @@ export default function TicketDetailPage() {
             )}
           </div>
         </div>
+      </div>
+
+      {/* SLA Progress Banner */}
+      <div className="mb-6">
+        <SlaProgressBanner
+          createdAt={ticket.created_at}
+          isClosed={ticket.status === 'RESOLVED' || ticket.status === 'CANCELLED'}
+        />
       </div>
 
       {/* Main Content */}
