@@ -53,6 +53,7 @@ export default function TicketActivityTimeline({ ticketId }: TicketActivityTimel
   const [totalCount, setTotalCount] = useState<number>(0);
   const [visibleCount, setVisibleCount] = useState<number>(5);
   const [expandedActivities, setExpandedActivities] = useState<Set<string>>(new Set());
+  const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
 
   useEffect(() => {
     loadActivities();
@@ -308,6 +309,29 @@ export default function TicketActivityTimeline({ ticketId }: TicketActivityTimel
     setVisibleCount(prev => Math.min(prev + 10, filteredActivities.length));
   };
 
+  const handleSelectActivity = (activityId: string) => {
+    setSelectedActivityId(activityId);
+  };
+
+  const handleClosePanel = () => {
+    setSelectedActivityId(null);
+  };
+
+  // Close panel on Escape key
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && selectedActivityId) {
+        handleClosePanel();
+      }
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [selectedActivityId]);
+
+  const selectedActivity = selectedActivityId
+    ? activities.find(a => a.id === selectedActivityId)
+    : null;
+
   if (loading) {
     return (
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
@@ -429,8 +453,19 @@ export default function TicketActivityTimeline({ ticketId }: TicketActivityTimel
                 const hasLongNote = activity.note && isLongText(activity.note);
                 const shouldTruncate = hasLongNote && !isExpanded;
 
+                const isSelected = selectedActivityId === activity.id;
+
                 return (
-                  <div key={activity.id} className="flex gap-3">
+                  <button
+                    key={activity.id}
+                    onClick={() => handleSelectActivity(activity.id)}
+                    className={`
+                      flex gap-3 w-full text-left rounded-lg px-3 py-2 -mx-3 -my-1 transition-all duration-150
+                      hover:bg-gray-50 cursor-pointer
+                      motion-reduce:transition-none
+                      ${isSelected ? 'bg-blue-50 ring-1 ring-blue-200' : ''}
+                    `}
+                  >
                     {/* Icon */}
                     <div className="flex-shrink-0">
                       <div
@@ -512,13 +547,173 @@ export default function TicketActivityTimeline({ ticketId }: TicketActivityTimel
                         </div>
                       )}
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>
           </div>
         ))}
       </div>
+
+      {/* Context Panel */}
+      {selectedActivity && (
+        <>
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-black bg-opacity-30 z-40 motion-reduce:transition-none transition-opacity duration-200"
+            onClick={handleClosePanel}
+          />
+
+          {/* Panel */}
+          <div className="fixed inset-y-0 right-0 w-full md:w-96 bg-white shadow-xl z-50 overflow-y-auto motion-reduce:transition-none transition-transform duration-200">
+            {/* Panel Header */}
+            <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-900">Detalles de la Actividad</h3>
+              <button
+                onClick={handleClosePanel}
+                className="p-1 rounded-md hover:bg-gray-100 transition text-gray-500 hover:text-gray-700"
+                aria-label="Cerrar panel"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Panel Content */}
+            <div className="p-4 space-y-4">
+              {/* Type Badge */}
+              <div>
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-100">
+                  <span className="text-base">{getActivityIcon(selectedActivity.activity_type)}</span>
+                  <span className="text-xs font-medium text-gray-700">
+                    {getActivityTitle(selectedActivity)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Timestamp */}
+              <div>
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Fecha y Hora</label>
+                <p className="mt-1 text-sm text-gray-900">
+                  {new Date(selectedActivity.created_at).toLocaleString('es-MX', {
+                    dateStyle: 'full',
+                    timeStyle: 'medium'
+                  })}
+                </p>
+              </div>
+
+              {/* Actor */}
+              <div>
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Realizado por</label>
+                <p className="mt-1 text-sm text-gray-900">
+                  {selectedActivity.actor?.full_name || 'Sistema'}
+                </p>
+                {selectedActivity.actor?.email && (
+                  <p className="text-xs text-gray-500 mt-0.5">{selectedActivity.actor.email}</p>
+                )}
+              </div>
+
+              {/* Status Change Details */}
+              {(selectedActivity.previous_status || selectedActivity.new_status) && (
+                <div>
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Cambio de Estado</label>
+                  <div className="mt-1 flex items-center gap-2 text-sm">
+                    <span className="px-2 py-1 bg-gray-100 rounded text-gray-700">
+                      {getStatusLabel(selectedActivity.previous_status)}
+                    </span>
+                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                    <span className="px-2 py-1 bg-blue-100 rounded text-blue-700">
+                      {getStatusLabel(selectedActivity.new_status)}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Technician Assignment */}
+              {(selectedActivity.assigned_technician || selectedActivity.previous_technician) && (
+                <div>
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Técnico</label>
+                  <div className="mt-1 space-y-1">
+                    {selectedActivity.previous_technician && (
+                      <p className="text-sm text-gray-500">
+                        Anterior: {selectedActivity.previous_technician.profile?.full_name}
+                      </p>
+                    )}
+                    {selectedActivity.assigned_technician && (
+                      <p className="text-sm text-gray-900 font-medium">
+                        {selectedActivity.previous_technician ? 'Nuevo: ' : ''}
+                        {selectedActivity.assigned_technician.profile?.full_name}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Note */}
+              {selectedActivity.note && (
+                <div>
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Nota</label>
+                  <div className="mt-1 text-sm text-gray-900 bg-gray-50 rounded-lg p-3 border border-gray-200 whitespace-pre-wrap">
+                    {selectedActivity.note}
+                  </div>
+                </div>
+              )}
+
+              {/* Evidence Preview */}
+              {selectedActivity.activity_type === 'EVIDENCE_ADDED' && (
+                <div>
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Evidencia</label>
+                  <div className="mt-1">
+                    {selectedActivity.evidence_id && selectedActivity.evidence ? (
+                      <EvidencePreview
+                        evidenceId={selectedActivity.evidence_id}
+                        fileUrl={selectedActivity.evidence.file_url}
+                      />
+                    ) : (
+                      <p className="text-sm text-gray-500">Archivo no disponible</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Signature Preview */}
+              {selectedActivity.activity_type === 'SIGNATURE_ADDED' && (
+                <div>
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Firma</label>
+                  <div className="mt-1">
+                    {selectedActivity.signature_id && selectedActivity.signature ? (
+                      <SignaturePreview
+                        signatureId={selectedActivity.signature_id}
+                        signatureUrl={selectedActivity.signature.signature_url}
+                      />
+                    ) : (
+                      <p className="text-sm text-gray-500">Firma no disponible</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Metadata (if exists and has relevant data) */}
+              {selectedActivity.metadata && Object.keys(selectedActivity.metadata).length > 0 && (
+                <div>
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Información Adicional</label>
+                  <div className="mt-1 text-xs text-gray-600 bg-gray-50 rounded-lg p-3 border border-gray-200">
+                    {Object.entries(selectedActivity.metadata).map(([key, value]) => (
+                      <div key={key} className="flex justify-between py-1">
+                        <span className="font-medium">{key}:</span>
+                        <span>{typeof value === 'object' ? JSON.stringify(value) : String(value)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Load more button */}
       {hasMore && (

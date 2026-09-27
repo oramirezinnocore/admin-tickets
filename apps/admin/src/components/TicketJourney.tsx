@@ -219,7 +219,7 @@ export default function TicketJourney({
       {/* Horizontal Steps */}
       <div className="px-4 py-6">
         <div
-          className="flex items-center justify-start gap-1 md:gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100"
+          className="grid grid-cols-3 md:grid-cols-6 gap-x-1 gap-y-4 md:gap-x-2 md:gap-y-0"
           role="tablist"
           aria-label="Etapas del ticket"
         >
@@ -246,7 +246,7 @@ export default function TicketJourney({
             }
 
             return (
-              <div key={step.id} className="flex items-center">
+              <div key={step.id} className="flex flex-col items-center justify-center relative">
                 {/* Step Button */}
                 <button
                   data-step-id={step.id}
@@ -313,12 +313,15 @@ export default function TicketJourney({
                   )}
                 </button>
 
-                {/* Connector Line */}
+                {/* Connector Line (as absolute positioned element) */}
+                {/* Mobile (grid-cols-3): hide connector at end of each row (index 2, 5) */}
+                {/* Desktop (grid-cols-6): hide connector only at last step (index 5) */}
                 {!isLast && (
                   <div
                     className={`
-                      h-0.5 w-3 md:w-4 transition-colors duration-200
+                      absolute top-6 md:top-7 left-[calc(50%+16px)] md:left-[calc(50%+18px)] h-0.5 w-full transition-colors duration-200
                       motion-reduce:transition-none
+                      ${index === 2 ? 'hidden md:block' : ''}
                       ${isCompleted ? 'bg-green-300' : 'bg-gray-300'}
                     `}
                   />
