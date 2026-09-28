@@ -26,6 +26,11 @@ import {
   formatTotalTicketTime,
 } from '@wisper/shared';
 import TicketActivityTimeline from '@/components/TicketActivity';
+import TicketJourney from '@/components/TicketJourney';
+import SlaProgressBanner from '@/components/SlaProgressBanner';
+import TicketTimesCard from '@/components/TicketTimesCard';
+import TicketInformationCard from '@/components/TicketInformationCard';
+import TicketClientCard from '@/components/TicketClientCard';
 
 interface TicketWithRelations extends Ticket {
   client: Client;
@@ -40,6 +45,7 @@ interface TechnicianLocation {
 }
 
 type LocationStatus = 'online' | 'recent' | 'stale';
+type DataVerificationState = 'loading' | 'present' | 'absent' | 'error';
 
 function getLocationStatus(recordedAt: string): LocationStatus {
   const now = new Date();
@@ -99,6 +105,8 @@ export default function TicketDetailPage() {
   const [ticket, setTicket] = useState<TicketWithRelations | null>(null);
   const [history, setHistory] = useState<TicketStatusHistory[]>([]);
   const [techLocation, setTechLocation] = useState<TechnicianLocation | null>(null);
+  const [evidenceState, setEvidenceState] = useState<DataVerificationState>('loading');
+  const [signatureState, setSignatureState] = useState<DataVerificationState>('loading');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
@@ -110,6 +118,7 @@ export default function TicketDetailPage() {
   useEffect(() => {
     loadTicket();
     loadHistory();
+    loadEvidenceAndSignature();
 
     // Auto refresh SLA every 60 seconds
     const interval = setInterval(() => {
@@ -181,6 +190,55 @@ export default function TicketDetailPage() {
     }
   }
 
+  async function loadEvidenceAndSignature() {
+    // Store current ticketId to prevent race conditions
+    const currentTicketId = ticketId;
+
+    // Set loading state
+    setEvidenceState('loading');
+    setSignatureState('loading');
+
+    try {
+      // Check for evidence
+      const { count: evidenceCount, error: evidenceError } = await supabase
+        .from('ticket_evidences')
+        .select('id', { count: 'exact', head: true })
+        .eq('ticket_id', ticketId);
+
+      // Only update state if we're still on the same ticket
+      if (currentTicketId === ticketId) {
+        if (evidenceError) {
+          setEvidenceState('error');
+        } else {
+          setEvidenceState(evidenceCount && evidenceCount > 0 ? 'present' : 'absent');
+        }
+      }
+
+      // Check for signature
+      const { data: signature, error: signatureError } = await supabase
+        .from('ticket_signatures')
+        .select('id')
+        .eq('ticket_id', ticketId)
+        .maybeSingle();
+
+      // Only update state if we're still on the same ticket
+      if (currentTicketId === ticketId) {
+        if (signatureError) {
+          setSignatureState('error');
+        } else {
+          setSignatureState(signature ? 'present' : 'absent');
+        }
+      }
+    } catch (err: any) {
+      console.error('Error loading evidence and signature:', err);
+      // Only update state if we're still on the same ticket
+      if (currentTicketId === ticketId) {
+        setEvidenceState('error');
+        setSignatureState('error');
+      }
+    }
+  }
+
   async function handleUnassign() {
     if (!ticket) return;
 
@@ -197,6 +255,7 @@ export default function TicketDetailPage() {
       if (error) throw error;
       await loadTicket();
       await loadHistory();
+      await loadEvidenceAndSignature();
     } catch (err: any) {
       alert('Error: ' + err.message);
     }
@@ -273,6 +332,7 @@ export default function TicketDetailPage() {
       setIsResolveModalOpen(false);
       await loadTicket();
       await loadHistory();
+      await loadEvidenceAndSignature();
     } catch (error: any) {
       // Re-throw to let modal handle error display
       throw error;
@@ -328,6 +388,11 @@ export default function TicketDetailPage() {
     window.open(`https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=17/${lat}/${lng}`, '_blank');
   }
 
+  function searchAddressInGoogleMaps(address: string) {
+    const encodedAddress = encodeURIComponent(address);
+    window.open(`https://www.google.com/maps/search/?api=1&query=${encodedAddress}`, '_blank');
+  }
+
   function getInitials(name: string): string {
     return name
       .split(' ')
@@ -365,7 +430,7 @@ export default function TicketDetailPage() {
       <div className="mb-6">
         <button
           onClick={() => router.push('/tickets')}
-          className="text-blue-600 hover:text-blue-800 mb-4 text-sm font-medium"
+          className="text-blue-600 hover:text-blue-800 mb-4 text-sm font-medium transition-colors duration-200 motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded-md px-2 py-1 -ml-2"
         >
           ← Volver a tickets
         </button>
@@ -390,7 +455,7 @@ export default function TicketDetailPage() {
             {canAssign() && (
               <button
                 onClick={() => setIsAssignModalOpen(true)}
-                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition"
+                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 hover:shadow-md transition-all duration-200 motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
               >
                 {ticket.technician_id ? 'Reasignar' : 'Asignar'}
               </button>
@@ -398,7 +463,7 @@ export default function TicketDetailPage() {
             {canUnassign() && (
               <button
                 onClick={() => setIsUnassignDialogOpen(true)}
-                className="px-4 py-2 bg-gray-200 text-gray-700 text-sm font-medium hover:bg-gray-300 rounded-md transition"
+                className="px-4 py-2 bg-gray-200 text-gray-700 text-sm font-medium hover:bg-gray-300 hover:shadow-md rounded-lg transition-all duration-200 motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2"
               >
                 Desasignar
               </button>
@@ -406,7 +471,7 @@ export default function TicketDetailPage() {
             {canResolve() && (
               <button
                 onClick={() => setIsResolveModalOpen(true)}
-                className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 transition"
+                className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 hover:shadow-md transition-all duration-200 motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
               >
                 Resolver
               </button>
@@ -414,13 +479,21 @@ export default function TicketDetailPage() {
             {canCancel() && (
               <button
                 onClick={() => setIsCancelModalOpen(true)}
-                className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-md hover:bg-red-700 transition"
+                className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 hover:shadow-md transition-all duration-200 motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
               >
                 Cancelar
               </button>
             )}
           </div>
         </div>
+      </div>
+
+      {/* SLA Progress Banner */}
+      <div className="mb-6">
+        <SlaProgressBanner
+          createdAt={ticket.created_at}
+          isClosed={ticket.status === 'RESOLVED' || ticket.status === 'CANCELLED'}
+        />
       </div>
 
       {/* Main Content */}
@@ -430,99 +503,22 @@ export default function TicketDetailPage() {
           {/* Bitácora del ticket */}
           <TicketActivityTimeline ticketId={ticketId} />
 
+          {/* Ticket Journey */}
+          <TicketJourney
+            ticket={ticket}
+            hasEvidence={evidenceState === 'present'}
+            hasSignature={signatureState === 'present'}
+            evidenceLoading={evidenceState === 'loading'}
+            signatureLoading={signatureState === 'loading'}
+            evidenceError={evidenceState === 'error'}
+            signatureError={signatureState === 'error'}
+          />
+
           {/* Ticket Information */}
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold mb-4">Información del ticket</h2>
-
-            {(ticket.admin_notes || ticket.technician_notes || ticket.solution_text || ticket.close_reason) && (
-              <div className="space-y-4">
-                {ticket.admin_notes && (
-                  <div>
-                    <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Observaciones</dt>
-                    <dd className="text-sm text-gray-900 whitespace-pre-wrap">{ticket.admin_notes}</dd>
-                  </div>
-                )}
-                {ticket.technician_notes && (
-                  <div>
-                    <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Notas del técnico</dt>
-                    <dd className="text-sm text-gray-900 whitespace-pre-wrap">{ticket.technician_notes}</dd>
-                  </div>
-                )}
-                {ticket.solution_text && (
-                  <div>
-                    <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Solución</dt>
-                    <dd className="text-sm text-gray-900 whitespace-pre-wrap">{ticket.solution_text}</dd>
-                  </div>
-                )}
-                {ticket.close_reason && (
-                  <div>
-                    <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Razón de cierre</dt>
-                    <dd className="text-sm text-gray-900">{ticket.close_reason}</dd>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {!ticket.admin_notes && !ticket.technician_notes && !ticket.solution_text && !ticket.close_reason && (
-              <p className="text-sm text-gray-500">Sin información adicional</p>
-            )}
-          </div>
+          <TicketInformationCard ticket={ticket} />
 
           {/* Cliente */}
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold mb-4">Cliente</h2>
-
-            <div className="space-y-3">
-              <div>
-                <p className="font-medium text-gray-900">{ticket.client?.name}</p>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                {ticket.client?.phone && (
-                  <div>
-                    <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Teléfono</dt>
-                    <dd className="text-gray-900">
-                      <a href={`tel:${ticket.client.phone}`} className="hover:text-blue-600">
-                        {ticket.client.phone}
-                      </a>
-                    </dd>
-                  </div>
-                )}
-
-                <div className="sm:col-span-2">
-                  <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Dirección</dt>
-                  <dd className="text-gray-900">{ticket.client?.address}</dd>
-                </div>
-              </div>
-
-              {ticket.client?.reference && (
-                <div>
-                  <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Referencia</dt>
-                  <dd className="text-sm text-gray-900">{ticket.client.reference}</dd>
-                </div>
-              )}
-
-              {hasValidCoordinates(ticket.client?.latitude, ticket.client?.longitude) ? (
-                <div className="space-y-2">
-                  <ClientMapPreview
-                    latitude={ticket.client!.latitude!}
-                    longitude={ticket.client!.longitude!}
-                    clientName={ticket.client?.name}
-                  />
-                  <button
-                    onClick={() => openInMaps(ticket.client!.latitude!, ticket.client!.longitude!)}
-                    className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-                  >
-                    Abrir en el mapa →
-                  </button>
-                </div>
-              ) : (
-                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-center">
-                  <p className="text-sm text-gray-500">Ubicación no configurada</p>
-                </div>
-              )}
-            </div>
-          </div>
+          <TicketClientCard client={ticket.client} />
         </div>
 
         {/* Sidebar */}
@@ -591,85 +587,7 @@ export default function TicketDetailPage() {
           </div>
 
           {/* Tiempos */}
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold mb-4">Tiempos</h2>
-
-            <div className="space-y-4">
-              <div className="text-center">
-                <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Antigüedad total</dt>
-                <dd className="text-2xl font-bold text-gray-900">{formatTicketAge(ticket.created_at)}</dd>
-              </div>
-
-              {/* Service Time Metrics */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-gray-200">
-                <div className="text-center">
-                  <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Tiempo hasta atención</dt>
-                  <dd className="text-lg font-semibold text-gray-900">{formatTimeToAttention(ticket.created_at, ticket.started_at)}</dd>
-                  <p className="text-xs text-gray-500 mt-1">Creación → Inicio</p>
-                </div>
-
-                <div className="text-center">
-                  <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Tiempo de atención</dt>
-                  <dd className="text-lg font-semibold text-gray-900">{formatAttentionTime(ticket.started_at, ticket.closed_at)}</dd>
-                  <p className="text-xs text-gray-500 mt-1">Inicio → Cierre</p>
-                </div>
-
-                <div className="text-center">
-                  <dt className="text-xs font-medium text-gray-500 uppercase mb-1">Tiempo total del ticket</dt>
-                  <dd className="text-lg font-semibold text-gray-900">{formatTotalTicketTime(ticket.created_at, ticket.closed_at)}</dd>
-                  <p className="text-xs text-gray-500 mt-1">Creación → Cierre</p>
-                </div>
-              </div>
-
-              <div className="relative">
-                <div className="absolute left-1/2 top-0 bottom-0 w-0.5 bg-gray-200 -translate-x-1/2"></div>
-
-                <div className="relative space-y-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1 text-right">
-                      <dt className="text-xs font-medium text-gray-500">Creado</dt>
-                      <dd className="text-xs text-gray-900">{new Date(ticket.created_at).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })}</dd>
-                    </div>
-                    <div className="w-3 h-3 rounded-full bg-blue-600 border-4 border-white shadow z-10"></div>
-                    <div className="flex-1"></div>
-                  </div>
-
-                  {ticket.assigned_at && (
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1 text-right">
-                        <dt className="text-xs font-medium text-gray-500">Asignado</dt>
-                        <dd className="text-xs text-gray-900">{new Date(ticket.assigned_at).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })}</dd>
-                      </div>
-                      <div className="w-2 h-2 rounded-full bg-gray-400 border-2 border-white shadow z-10"></div>
-                      <div className="flex-1"></div>
-                    </div>
-                  )}
-
-                  {ticket.started_at && (
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1 text-right">
-                        <dt className="text-xs font-medium text-gray-500">Iniciado</dt>
-                        <dd className="text-xs text-gray-900">{new Date(ticket.started_at).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })}</dd>
-                      </div>
-                      <div className="w-2 h-2 rounded-full bg-gray-400 border-2 border-white shadow z-10"></div>
-                      <div className="flex-1"></div>
-                    </div>
-                  )}
-
-                  {ticket.closed_at && (
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1 text-right">
-                        <dt className="text-xs font-medium text-gray-500">Cerrado</dt>
-                        <dd className="text-xs text-gray-900">{new Date(ticket.closed_at).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })}</dd>
-                      </div>
-                      <div className={`w-3 h-3 rounded-full border-4 border-white shadow z-10 ${ticket.status === 'RESOLVED' ? 'bg-green-600' : 'bg-red-600'}`}></div>
-                      <div className="flex-1"></div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
+          <TicketTimesCard ticket={ticket} />
 
           {/* Línea de tiempo */}
           {history.length > 0 && (
