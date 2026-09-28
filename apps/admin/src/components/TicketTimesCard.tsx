@@ -48,7 +48,7 @@ export default function TicketTimesCard({ ticket }: TicketTimesCardProps) {
         </div>
 
         {/* Tres Métricas Secundarias */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4">
           {/* Tiempo hasta atención */}
           <div className="bg-gradient-to-br from-purple-50 to-white rounded-lg border border-purple-200 p-4 transition-all duration-200 hover:border-purple-300 hover:shadow-sm motion-reduce:transition-none">
             <div className="space-y-2">
