@@ -120,9 +120,12 @@ export default function TicketDetailPage() {
     loadHistory();
     loadEvidenceAndSignature();
 
-    // Auto refresh SLA every 60 seconds
+    // Auto refresh ticket data every 60 seconds
     const interval = setInterval(() => {
       setRefreshCounter(c => c + 1);
+      loadTicket(); // Refresh complete ticket to detect changes from Android
+      loadHistory(); // Refresh history
+      loadEvidenceAndSignature(); // Refresh evidence and signature state
       if (ticket?.technician_id) {
         loadTechnicianLocation(ticket.technician_id);
       }

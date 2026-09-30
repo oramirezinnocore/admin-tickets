@@ -72,6 +72,7 @@ export default function ClientImportModal({
       }
       setFile(selectedFile);
       setValidationResult(null);
+      setImportId(''); // Reset importId when new file is selected
       setError('');
       setSuccessMessage('');
     }
@@ -87,6 +88,7 @@ export default function ClientImportModal({
       }
       setFile(droppedFile);
       setValidationResult(null);
+      setImportId(''); // Reset importId when new file is dropped
       setError('');
       setSuccessMessage('');
     }

@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
-import { validatePassword, passwordsMatch } from '@wisper/shared';
+import { validatePassword, passwordsMatch, canAccessBackOffice } from '@wisper/shared';
 
 export default function ChangePasswordPage() {
   const router = useRouter();
@@ -65,9 +65,26 @@ export default function ChangePasswordPage() {
         throw new Error(data.error || 'Error al actualizar el perfil');
       }
 
-      // Step 3: Refresh profile and redirect
+      // Step 3: Refresh profile and redirect based on role
       await refreshProfile();
-      router.push('/dashboard');
+
+      // Get updated profile to check role
+      const { data: updatedProfile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', session.user.id)
+        .single();
+
+      if (updatedProfile && canAccessBackOffice(updatedProfile.role)) {
+        // ADMIN, SUPER_ADMIN, SUPPORT can access dashboard
+        router.push('/dashboard');
+      } else {
+        // TECHNICIAN or other roles: sign out and show success message
+        await supabase.auth.signOut();
+        setError('');
+        alert('Contraseña actualizada exitosamente. Por favor inicia sesión en la aplicación móvil.');
+        router.push('/login');
+      }
     } catch (err: any) {
       console.error('Error changing password:', err);
       setError(err.message || 'Error al cambiar la contraseña');
