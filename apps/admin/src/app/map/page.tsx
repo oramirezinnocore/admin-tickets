@@ -4,13 +4,17 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import ProtectedLayout from '@/components/ProtectedLayout';
 import { supabase } from '@/lib/supabase';
 import { initMapLibre } from '@/lib/maplibre';
-import { getTicketSlaState, TicketSlaState, formatTicketFolio, hasValidCoordinates, DEFAULT_MAP_STYLE, MORELIA_CENTER } from '@wisper/shared';
+import { getTicketSlaState, TicketSlaState, formatTicketFolio, hasValidCoordinates, DEFAULT_MAP_STYLE, MORELIA_CENTER, TechnicianMarkerIcon, TechnicianMarkerColor } from '@wisper/shared';
+import { getMarkerIconComponent, getMarkerColorHex } from '@/lib/technician-markers';
+import { renderToStaticMarkup } from 'react-dom/server';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 interface TechnicianWithLocation {
   id: string;
   zone: string | null;
   vehicle: string | null;
+  map_marker_icon: TechnicianMarkerIcon | null;
+  map_marker_color: TechnicianMarkerColor | null;
   profile: {
     full_name: string;
     email: string | null;
@@ -554,6 +558,8 @@ export default function MapPage() {
           id,
           zone,
           vehicle,
+          map_marker_icon,
+          map_marker_color,
           is_active,
           profile:profiles(full_name, email, phone)
         `)
@@ -782,6 +788,53 @@ export default function MapPage() {
     });
   }
 
+  function createTechnicianMarkerElement(tech: TechnicianWithLocation, locationStatus: LocationStatus): HTMLElement {
+    const el = document.createElement('div');
+    el.className = 'technician-marker';
+    el.style.position = 'relative';
+    el.style.cursor = 'pointer';
+
+    // Get technician's personal marker color and icon
+    const IconComponent = getMarkerIconComponent(tech.map_marker_icon);
+    const markerColor = getMarkerColorHex(tech.map_marker_color);
+
+    // Get status color for the badge
+    const statusColor = getStatusColor(locationStatus);
+
+    // Create main marker circle with personal color and icon
+    const markerCircle = document.createElement('div');
+    markerCircle.style.width = '36px';
+    markerCircle.style.height = '36px';
+    markerCircle.style.borderRadius = '50%';
+    markerCircle.style.backgroundColor = markerColor;
+    markerCircle.style.border = '3px solid white';
+    markerCircle.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
+    markerCircle.style.display = 'flex';
+    markerCircle.style.alignItems = 'center';
+    markerCircle.style.justifyContent = 'center';
+
+    // Render icon as SVG string
+    const iconSvg = renderToStaticMarkup(<IconComponent className="w-5 h-5 text-white" />);
+    markerCircle.innerHTML = iconSvg;
+
+    // Create status badge (small circle indicating location freshness)
+    const statusBadge = document.createElement('div');
+    statusBadge.style.position = 'absolute';
+    statusBadge.style.top = '-2px';
+    statusBadge.style.right = '-2px';
+    statusBadge.style.width = '12px';
+    statusBadge.style.height = '12px';
+    statusBadge.style.borderRadius = '50%';
+    statusBadge.style.backgroundColor = statusColor;
+    statusBadge.style.border = '2px solid white';
+    statusBadge.style.boxShadow = '0 1px 2px rgba(0,0,0,0.2)';
+
+    el.appendChild(markerCircle);
+    el.appendChild(statusBadge);
+
+    return el;
+  }
+
   async function updateMarkers() {
     if (!mapRef.current) return;
 
@@ -803,16 +856,16 @@ export default function MapPage() {
       }
 
       const status = getLocationStatus(tech.location.recorded_at);
-      const color = getStatusColor(status);
       const existingMarker = markersRef.current.get(tech.id);
 
       if (existingMarker) {
-        // Update existing marker position and color
+        // Update existing marker position
         existingMarker.setLngLat([tech.location.longitude, tech.location.latitude]);
 
-        // Update marker element color
-        const el = existingMarker.getElement();
-        el.style.backgroundColor = color;
+        // Recreate marker element with updated personal marker and status
+        const newEl = createTechnicianMarkerElement(tech, status);
+        const oldEl = existingMarker.getElement();
+        oldEl.replaceWith(newEl);
 
         // Update popup content AND setup event listener
         const popupContent = buildTechnicianPopupContent(tech);
@@ -820,16 +873,8 @@ export default function MapPage() {
         setupPopupWithReverseGeocode(popup, tech);
         existingMarker.setPopup(popup);
       } else {
-        // Create new marker
-        const el = document.createElement('div');
-        el.className = 'technician-marker';
-        el.style.backgroundColor = color;
-        el.style.width = '24px';
-        el.style.height = '24px';
-        el.style.borderRadius = '50%';
-        el.style.border = '3px solid white';
-        el.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
-        el.style.cursor = 'pointer';
+        // Create new marker with custom element
+        const el = createTechnicianMarkerElement(tech, status);
 
         const marker = new (maplibregl as any).Marker({ element: el })
           .setLngLat([tech.location.longitude, tech.location.latitude])

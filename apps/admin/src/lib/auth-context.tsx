@@ -4,7 +4,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { User } from '@supabase/supabase-js';
 import { supabase } from './supabase';
-import { Profile, isAnyAdmin } from '@wisper/shared';
+import { Profile, canAccessBackOffice } from '@wisper/shared';
 
 interface AuthContextType {
   user: User | null;
@@ -119,8 +119,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { error: 'Profile not found. Please contact support.' };
       }
 
-      // Check if user is ADMIN or SUPER_ADMIN
-      if (!isAnyAdmin(profileData.role)) {
+      // Check if user can access back office (ADMIN, SUPER_ADMIN, or SUPPORT)
+      if (!canAccessBackOffice(profileData.role)) {
         await supabase.auth.signOut();
         setLoading(false);
         return { error: 'Este usuario no tiene acceso al panel administrativo.' };

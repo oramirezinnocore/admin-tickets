@@ -5,8 +5,10 @@ import ProtectedLayout from '@/components/ProtectedLayout';
 import Modal from '@/components/ui/Modal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { supabase } from '@/lib/supabase';
-import { Profile, Technician, UserRole } from '@wisper/shared';
+import { Profile, Technician, UserRole, TechnicianMarkerIcon, TechnicianMarkerColor } from '@wisper/shared';
 import { useAuth } from '@/lib/auth-context';
+import TechnicianMarkerSelector from '@/components/TechnicianMarkerSelector';
+import { getDefaultMarkerIcon, getDefaultMarkerColor, getMarkerIconComponent, getMarkerColorTextClass } from '@/lib/technician-markers';
 
 interface PersonnelRecord extends Profile {
   technician?: Technician | null;
@@ -261,11 +263,26 @@ export default function PersonnelPage() {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {filteredPersonnel.map(person => (
-                <tr key={person.id}>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    {person.full_name}
-                  </td>
+              {filteredPersonnel.map(person => {
+                const IconComponent = person.role === UserRole.TECHNICIAN && person.technician
+                  ? getMarkerIconComponent(person.technician.map_marker_icon)
+                  : null;
+                const markerColorClass = person.role === UserRole.TECHNICIAN && person.technician
+                  ? getMarkerColorTextClass(person.technician.map_marker_color)
+                  : '';
+
+                return (
+                  <tr key={person.id}>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
+                        {IconComponent && (
+                          <div className={`flex-shrink-0 ${markerColorClass}`}>
+                            <IconComponent className="w-4 h-4" />
+                          </div>
+                        )}
+                        <span>{person.full_name}</span>
+                      </div>
+                    </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     {person.email || '-'}
                   </td>
@@ -314,8 +331,9 @@ export default function PersonnelPage() {
                       </button>
                     </td>
                   )}
-                </tr>
-              ))}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -478,6 +496,8 @@ function CreatePersonnelModal({ isOpen, onClose, onSuccess, callerRole }: Create
     role: UserRole.TECHNICIAN,
     zone: '',
     vehicle: '',
+    map_marker_icon: getDefaultMarkerIcon(),
+    map_marker_color: getDefaultMarkerColor(),
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -500,6 +520,8 @@ function CreatePersonnelModal({ isOpen, onClose, onSuccess, callerRole }: Create
         role: availableRoles[0] || UserRole.TECHNICIAN,
         zone: '',
         vehicle: '',
+        map_marker_icon: getDefaultMarkerIcon(),
+        map_marker_color: getDefaultMarkerColor(),
       });
       setError('');
       setCredentials(null);
@@ -540,6 +562,8 @@ function CreatePersonnelModal({ isOpen, onClose, onSuccess, callerRole }: Create
           role: formData.role,
           zone: isTechnicianRole ? (formData.zone.trim() || null) : null,
           vehicle: isTechnicianRole ? (formData.vehicle.trim() || null) : null,
+          map_marker_icon: isTechnicianRole ? formData.map_marker_icon : null,
+          map_marker_color: isTechnicianRole ? formData.map_marker_color : null,
         }),
       });
 
@@ -671,6 +695,14 @@ function CreatePersonnelModal({ isOpen, onClose, onSuccess, callerRole }: Create
                 className="w-full px-3 py-2 border rounded-md"
               />
             </div>
+
+            <TechnicianMarkerSelector
+              selectedIcon={formData.map_marker_icon}
+              selectedColor={formData.map_marker_color}
+              onIconChange={icon => setFormData({ ...formData, map_marker_icon: icon })}
+              onColorChange={color => setFormData({ ...formData, map_marker_color: color })}
+              technicianName={formData.full_name.trim() || 'Nuevo técnico'}
+            />
           </>
         )}
 
@@ -716,6 +748,8 @@ function EditPersonnelModal({
     newRole: '',
     zone: '',
     vehicle: '',
+    map_marker_icon: getDefaultMarkerIcon(),
+    map_marker_color: getDefaultMarkerColor(),
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -738,6 +772,8 @@ function EditPersonnelModal({
         newRole: '',
         zone: person.technician?.zone || '',
         vehicle: person.technician?.vehicle || '',
+        map_marker_icon: person.technician?.map_marker_icon || getDefaultMarkerIcon(),
+        map_marker_color: person.technician?.map_marker_color || getDefaultMarkerColor(),
       });
     }
     setError('');
@@ -780,6 +816,8 @@ function EditPersonnelModal({
           newRole: formData.newRole || undefined,
           zone: isTechnicianRole ? (formData.zone.trim() || null) : undefined,
           vehicle: isTechnicianRole ? (formData.vehicle.trim() || null) : undefined,
+          map_marker_icon: isTechnicianRole ? formData.map_marker_icon : undefined,
+          map_marker_color: isTechnicianRole ? formData.map_marker_color : undefined,
         }),
       });
 
@@ -882,6 +920,14 @@ function EditPersonnelModal({
                 className="w-full px-3 py-2 border rounded-md"
               />
             </div>
+
+            <TechnicianMarkerSelector
+              selectedIcon={formData.map_marker_icon}
+              selectedColor={formData.map_marker_color}
+              onIconChange={icon => setFormData({ ...formData, map_marker_icon: icon })}
+              onColorChange={color => setFormData({ ...formData, map_marker_color: color })}
+              technicianName={formData.full_name.trim() || 'Técnico'}
+            />
           </>
         )}
 
