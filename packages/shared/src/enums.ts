@@ -20,3 +20,21 @@ export enum TicketSlaState {
   RED = 'RED',
   OVERDUE = 'OVERDUE'
 }
+
+export enum TechnicianMarkerIcon {
+  CAR = 'CAR',
+  VAN = 'VAN',
+  MOTORCYCLE = 'MOTORCYCLE',
+  PERSON = 'PERSON'
+}
+
+export enum TechnicianMarkerColor {
+  BLUE = 'BLUE',
+  GREEN = 'GREEN',
+  ORANGE = 'ORANGE',
+  PURPLE = 'PURPLE',
+  RED = 'RED',
+  CYAN = 'CYAN',
+  AMBER = 'AMBER',
+  PINK = 'PINK'
+}

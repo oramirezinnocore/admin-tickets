@@ -1,4 +1,4 @@
-import { UserRole, TicketStatus } from './enums';
+import { UserRole, TicketStatus, TechnicianMarkerIcon, TechnicianMarkerColor } from './enums';
 
 export interface Profile {
   id: string;
@@ -30,6 +30,8 @@ export interface Technician {
   profile_id: string;
   zone: string | null;
   vehicle: string | null;
+  map_marker_icon: TechnicianMarkerIcon | null;
+  map_marker_color: TechnicianMarkerColor | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;

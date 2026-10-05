@@ -100,7 +100,7 @@ export async function POST(request: NextRequest) {
 
     // Get request body
     const body = await request.json();
-    const { full_name, email, phone, role, zone, vehicle } = body;
+    const { full_name, email, phone, role, zone, vehicle, map_marker_icon, map_marker_color } = body;
 
     // Validate required fields
     if (!full_name || !email || !role) {
@@ -203,6 +203,8 @@ export async function POST(request: NextRequest) {
             profile_id: userId,
             zone: zone || null,
             vehicle: vehicle || null,
+            map_marker_icon: map_marker_icon || null,
+            map_marker_color: map_marker_color || null,
             is_active: true,
           });
 
@@ -300,7 +302,7 @@ export async function PATCH(request: NextRequest) {
 
     // Get request body
     const body = await request.json();
-    const { id, full_name, phone, newRole, zone, vehicle } = body;
+    const { id, full_name, phone, newRole, zone, vehicle, map_marker_icon, map_marker_color } = body;
 
     if (!id) {
       return NextResponse.json({ error: 'ID requerido' }, { status: 400 });
@@ -391,6 +393,8 @@ export async function PATCH(request: NextRequest) {
               is_active: true,
               zone: zone || existingTechnician.zone,
               vehicle: vehicle || existingTechnician.vehicle,
+              map_marker_icon: map_marker_icon || existingTechnician.map_marker_icon,
+              map_marker_color: map_marker_color || existingTechnician.map_marker_color,
             })
             .eq('id', existingTechnician.id);
 
@@ -408,6 +412,8 @@ export async function PATCH(request: NextRequest) {
               profile_id: id,
               zone: zone || null,
               vehicle: vehicle || null,
+              map_marker_icon: map_marker_icon || null,
+              map_marker_color: map_marker_color || null,
               is_active: true,
             });
 
@@ -469,10 +475,12 @@ export async function PATCH(request: NextRequest) {
 
     // Update technician fields if applicable
     const currentRole = newRole || targetProfile.role;
-    if (currentRole === UserRole.TECHNICIAN && (zone !== undefined || vehicle !== undefined)) {
+    if (currentRole === UserRole.TECHNICIAN && (zone !== undefined || vehicle !== undefined || map_marker_icon !== undefined || map_marker_color !== undefined)) {
       const techUpdates: any = {};
       if (zone !== undefined) techUpdates.zone = zone;
       if (vehicle !== undefined) techUpdates.vehicle = vehicle;
+      if (map_marker_icon !== undefined) techUpdates.map_marker_icon = map_marker_icon;
+      if (map_marker_color !== undefined) techUpdates.map_marker_color = map_marker_color;
 
       if (Object.keys(techUpdates).length > 0) {
         const { error: techUpdateError } = await supabaseAdmin
