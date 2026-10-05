@@ -813,9 +813,36 @@ export default function MapPage() {
     markerCircle.style.alignItems = 'center';
     markerCircle.style.justifyContent = 'center';
 
-    // Render icon as SVG string
-    const iconSvg = renderToStaticMarkup(<IconComponent className="w-5 h-5 text-white" />);
-    markerCircle.innerHTML = iconSvg;
+    // Render Lucide icon with inline styles (NO CSS classes)
+    // This ensures the icon renders correctly with all SVG elements (paths, circles, etc.)
+    const iconHtml = renderToStaticMarkup(
+      <IconComponent
+        style={{
+          width: '20px',
+          height: '20px',
+          color: 'white',
+          stroke: 'white',
+          fill: 'none',
+          strokeWidth: '2',
+          display: 'block',
+          flexShrink: '0'
+        }}
+      />
+    );
+
+    // Parse HTML string to DOM and insert into marker
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = iconHtml;
+    const svgElement = tempDiv.firstElementChild;
+
+    if (svgElement) {
+      // Ensure the SVG has explicit dimensions and styles
+      svgElement.setAttribute('width', '20');
+      svgElement.setAttribute('height', '20');
+      (svgElement as HTMLElement).style.display = 'block';
+      (svgElement as HTMLElement).style.flexShrink = '0';
+      markerCircle.appendChild(svgElement);
+    }
 
     // Create status badge (small circle indicating location freshness)
     const statusBadge = document.createElement('div');
