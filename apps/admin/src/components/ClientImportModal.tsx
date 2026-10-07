@@ -70,11 +70,14 @@ export default function ClientImportModal({
         setError('Por favor selecciona un archivo CSV válido');
         return;
       }
+      // Clean ALL state when new file is selected
       setFile(selectedFile);
       setValidationResult(null);
       setImportId(''); // Reset importId when new file is selected
       setError('');
       setSuccessMessage('');
+      setValidating(false); // Ensure validating flag is reset
+      setImporting(false); // Ensure importing flag is reset
     }
   }
 
@@ -86,11 +89,14 @@ export default function ClientImportModal({
         setError('Por favor selecciona un archivo CSV válido');
         return;
       }
+      // Clean ALL state when new file is dropped
       setFile(droppedFile);
       setValidationResult(null);
       setImportId(''); // Reset importId when new file is dropped
       setError('');
       setSuccessMessage('');
+      setValidating(false); // Ensure validating flag is reset
+      setImporting(false); // Ensure importing flag is reset
     }
   }
 

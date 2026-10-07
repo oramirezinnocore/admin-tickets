@@ -433,70 +433,13 @@ export default function MapPage() {
     });
   }, [mapReady, officeCoords, selectedTech, routeTechId]);
 
-  // Add office marker when coords are available
-  useEffect(() => {
-    const addOfficeMarker = async () => {
-      if (!mapReady || !mapRef.current || !officeCoords) {
-        // Remove marker if no coords
-        if (officeMarkerRef.current) {
-          officeMarkerRef.current.remove();
-          officeMarkerRef.current = null;
-        }
-        return;
-      }
-
-      const maplibregl = await initMapLibre();
-
-      // Remove old marker if exists
-      if (officeMarkerRef.current) {
-        officeMarkerRef.current.remove();
-      }
-
-      // Create office marker element
-      const el = document.createElement('div');
-      el.className = 'office-marker';
-      el.style.backgroundColor = '#3B82F6';
-      el.style.width = '32px';
-      el.style.height = '32px';
-      el.style.borderRadius = '50%';
-      el.style.border = '3px solid white';
-      el.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
-      el.style.cursor = 'pointer';
-      el.style.display = 'flex';
-      el.style.alignItems = 'center';
-      el.style.justifyContent = 'center';
-      el.style.fontSize = '16px';
-      el.innerHTML = '🏢';
-
-      // Create marker
-      const marker = new (maplibregl as any).Marker({ element: el })
-        .setLngLat(officeCoords)
-        .addTo(mapRef.current);
-
-      // Add popup
-      const popup = new (maplibregl as any).Popup({ offset: 25 }).setHTML(`
-        <div style="padding: 12px; min-width: 200px;">
-          <div style="font-weight: 700; font-size: 15px; margin-bottom: 8px; color: #111827;">
-            Oficina central
-          </div>
-          <div style="font-size: 13px; color: #374151; line-height: 1.4;">
-            ${officeCoords[1].toFixed(6)}, ${officeCoords[0].toFixed(6)}
-          </div>
-        </div>
-      `);
-
-      marker.setPopup(popup);
-      officeMarkerRef.current = marker;
-    };
-
-    addOfficeMarker();
-  }, [mapReady, officeCoords]);
+  // Office marker is now managed in updateMarkers() - no separate useEffect needed
 
   useEffect(() => {
     if (mapRef.current && tab === 'locations') {
       updateMarkers();
     }
-  }, [technicians, tab]);
+  }, [technicians, tab, officeCoords]);
 
   useEffect(() => {
     if (routeTechId) {
@@ -571,10 +514,38 @@ export default function MapPage() {
         .from('technician_latest_locations')
         .select('*');
 
-      const combined: TechnicianWithLocation[] = techData.map((tech: any) => ({
-        ...tech,
-        location: locations?.find((l: any) => l.technician_id === tech.id) || null,
-      }));
+      // [DEBUG] Log raw data from Supabase
+      console.log('[LOAD TECHNICIANS] Raw technician data:', techData.map((t: any) => ({
+        id: t.id,
+        name: t.profile.full_name
+      })));
+      console.log('[LOAD LOCATIONS] Raw location data:', locations?.map((l: any) => ({
+        technician_id: l.technician_id,
+        latitude: l.latitude,
+        longitude: l.longitude,
+        recorded_at: l.recorded_at
+      })));
+
+      const combined: TechnicianWithLocation[] = techData.map((tech: any) => {
+        const matchedLocation = locations?.find((l: any) => l.technician_id === tech.id);
+
+        // [DEBUG] Log merge operation for each technician
+        console.log('[MERGE] Technician:', {
+          techId: tech.id,
+          name: tech.profile.full_name,
+          matchedLocationFound: !!matchedLocation,
+          matchedLocationTechId: matchedLocation?.technician_id,
+          matchedCoords: matchedLocation ? {
+            lat: matchedLocation.latitude,
+            lng: matchedLocation.longitude
+          } : null
+        });
+
+        return {
+          ...tech,
+          location: matchedLocation || null,
+        };
+      });
 
       setTechnicians(combined);
 
@@ -789,32 +760,35 @@ export default function MapPage() {
   }
 
   function createTechnicianMarkerElement(tech: TechnicianWithLocation, locationStatus: LocationStatus): HTMLElement {
+    // ROOT element - CRITICAL: NO position/transform styles
+    // MapLibre must control transform/position of this element
     const el = document.createElement('div');
     el.className = 'technician-marker';
-    el.style.position = 'relative';
-    el.style.cursor = 'pointer';
+    // Explicitly set display to allow MapLibre positioning
+    el.style.display = 'block';
 
     // Get technician's personal marker color and icon
     const IconComponent = getMarkerIconComponent(tech.map_marker_icon);
     const markerColor = getMarkerColorHex(tech.map_marker_color);
-
-    // Get status color for the badge
     const statusColor = getStatusColor(locationStatus);
 
-    // Create main marker circle with personal color and icon
+    // Create marker circle
     const markerCircle = document.createElement('div');
-    markerCircle.style.width = '36px';
-    markerCircle.style.height = '36px';
-    markerCircle.style.borderRadius = '50%';
-    markerCircle.style.backgroundColor = markerColor;
-    markerCircle.style.border = '3px solid white';
-    markerCircle.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
-    markerCircle.style.display = 'flex';
-    markerCircle.style.alignItems = 'center';
-    markerCircle.style.justifyContent = 'center';
+    Object.assign(markerCircle.style, {
+      width: '36px',
+      height: '36px',
+      borderRadius: '50%',
+      backgroundColor: markerColor,
+      border: '3px solid white',
+      boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      position: 'relative',
+      cursor: 'pointer'
+    });
 
-    // Render Lucide icon with inline styles (NO CSS classes)
-    // This ensures the icon renders correctly with all SVG elements (paths, circles, etc.)
+    // Render Lucide icon with inline styles
     const iconHtml = renderToStaticMarkup(
       <IconComponent
         style={{
@@ -830,13 +804,12 @@ export default function MapPage() {
       />
     );
 
-    // Parse HTML string to DOM and insert into marker
+    // Parse and insert SVG
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = iconHtml;
     const svgElement = tempDiv.firstElementChild;
 
     if (svgElement) {
-      // Ensure the SVG has explicit dimensions and styles
       svgElement.setAttribute('width', '20');
       svgElement.setAttribute('height', '20');
       (svgElement as HTMLElement).style.display = 'block';
@@ -844,20 +817,22 @@ export default function MapPage() {
       markerCircle.appendChild(svgElement);
     }
 
-    // Create status badge (small circle indicating location freshness)
+    // Status badge (inside marker circle for positioning)
     const statusBadge = document.createElement('div');
-    statusBadge.style.position = 'absolute';
-    statusBadge.style.top = '-2px';
-    statusBadge.style.right = '-2px';
-    statusBadge.style.width = '12px';
-    statusBadge.style.height = '12px';
-    statusBadge.style.borderRadius = '50%';
-    statusBadge.style.backgroundColor = statusColor;
-    statusBadge.style.border = '2px solid white';
-    statusBadge.style.boxShadow = '0 1px 2px rgba(0,0,0,0.2)';
+    Object.assign(statusBadge.style, {
+      position: 'absolute',
+      top: '-2px',
+      right: '-2px',
+      width: '12px',
+      height: '12px',
+      borderRadius: '50%',
+      backgroundColor: statusColor,
+      border: '2px solid white',
+      boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+    });
 
+    markerCircle.appendChild(statusBadge);
     el.appendChild(markerCircle);
-    el.appendChild(statusBadge);
 
     return el;
   }
@@ -866,62 +841,136 @@ export default function MapPage() {
     if (!mapRef.current) return;
 
     const maplibregl = await initMapLibre();
-    const processedIds = new Set<string>();
 
+    // ============================================================================
+    // TECHNICIAN MARKERS
+    // ============================================================================
+
+    // Remove ALL existing technician markers
+    markersRef.current.forEach(marker => marker.remove());
+    markersRef.current.clear();
+
+    // Create NEW markers for each technician with location
     technicians.forEach(tech => {
-      processedIds.add(tech.id);
-
       // Skip technicians without location
       if (!tech.location) {
-        // Remove marker if exists (technician lost location)
-        const existingMarker = markersRef.current.get(tech.id);
-        if (existingMarker) {
-          existingMarker.remove();
-          markersRef.current.delete(tech.id);
-        }
         return;
       }
 
-      const status = getLocationStatus(tech.location.recorded_at);
-      const existingMarker = markersRef.current.get(tech.id);
+      // Validate coordinates
+      const lng = Number(tech.location.longitude);
+      const lat = Number(tech.location.latitude);
 
-      if (existingMarker) {
-        // Update existing marker position
-        existingMarker.setLngLat([tech.location.longitude, tech.location.latitude]);
-
-        // Recreate marker element with updated personal marker and status
-        const newEl = createTechnicianMarkerElement(tech, status);
-        const oldEl = existingMarker.getElement();
-        oldEl.replaceWith(newEl);
-
-        // Update popup content AND setup event listener
-        const popupContent = buildTechnicianPopupContent(tech);
-        const popup = new (maplibregl as any).Popup({ offset: 25 }).setHTML(popupContent);
-        setupPopupWithReverseGeocode(popup, tech);
-        existingMarker.setPopup(popup);
-      } else {
-        // Create new marker with custom element
-        const el = createTechnicianMarkerElement(tech, status);
-
-        const marker = new (maplibregl as any).Marker({ element: el })
-          .setLngLat([tech.location.longitude, tech.location.latitude])
-          .addTo(mapRef.current!);
-
-        const popupContent = buildTechnicianPopupContent(tech);
-        const popup = new (maplibregl as any).Popup({ offset: 25 }).setHTML(popupContent);
-        setupPopupWithReverseGeocode(popup, tech);
-
-        marker.setPopup(popup);
-        markersRef.current.set(tech.id, marker);
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+        console.error('[TECH MARKER] Invalid coordinates for', tech.profile.full_name, { lng, lat });
+        return;
       }
+
+      // [DEBUG] Log technician marker data for geographic validation
+      console.log('[TECH MARKER DATA]', {
+        technicianId: tech.id,
+        name: tech.profile.full_name,
+        latitude: lat,
+        longitude: lng,
+        recordedAt: tech.location.recorded_at,
+        markerLngLat: [lng, lat]
+      });
+
+      // Get location status for this technician
+      const status = getLocationStatus(tech.location.recorded_at);
+
+      // Create custom marker element with configured icon and color
+      const el = createTechnicianMarkerElement(tech, status);
+
+      // Create marker instance
+      const marker = new (maplibregl as any).Marker({ element: el })
+        .setLngLat([lng, lat])
+        .addTo(mapRef.current!);
+
+      // [DEBUG] Proof logs
+      console.log('[TECH-MARKER-PROOF]', {
+        technicianId: tech.id,
+        name: tech.profile.full_name,
+        expected: [lng, lat],
+        actual: marker.getLngLat(),
+        connected: marker.getElement().isConnected,
+        transform: marker.getElement().style.transform
+      });
+
+      // Create popup
+      const popupContent = buildTechnicianPopupContent(tech);
+      const popup = new (maplibregl as any).Popup({ offset: 25 }).setHTML(popupContent);
+      setupPopupWithReverseGeocode(popup, tech);
+      marker.setPopup(popup);
+
+      // Store marker reference
+      markersRef.current.set(tech.id, marker);
     });
 
-    // Remove markers for technicians that no longer exist
-    markersRef.current.forEach((marker, techId) => {
-      if (!processedIds.has(techId)) {
-        marker.remove();
-        markersRef.current.delete(techId);
-      }
+    // ============================================================================
+    // OFFICE MARKER (SINGLE OWNER - managed here alongside technician markers)
+    // ============================================================================
+
+    // Remove old office marker if exists
+    if (officeMarkerRef.current) {
+      console.log('[OFFICE MARKER REMOVE]');
+      officeMarkerRef.current.remove();
+      officeMarkerRef.current = null;
+    }
+
+    // Create office marker if coordinates available (SAME pattern as technician markers)
+    if (officeCoords) {
+      console.log('[OFFICE MARKER CREATE]', { officeCoords });
+
+      const el = document.createElement('div');
+      el.className = 'office-marker';
+      el.style.backgroundColor = '#2563EB';
+      el.style.width = '44px';
+      el.style.height = '44px';
+      el.style.borderRadius = '50%';
+      el.style.border = '3px solid white';
+      el.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
+      el.style.cursor = 'pointer';
+      el.style.display = 'flex';
+      el.style.alignItems = 'center';
+      el.style.justifyContent = 'center';
+      el.style.fontSize = '22px';
+      el.textContent = '🏢';
+
+      // Create marker (EXACT same pattern as technician)
+      const marker = new (maplibregl as any).Marker({ element: el })
+        .setLngLat(officeCoords)
+        .addTo(mapRef.current!);
+
+      console.log('[OFFICE MARKER CREATED]', {
+        lngLat: marker.getLngLat(),
+        connected: marker.getElement().isConnected,
+        transform: marker.getElement().style.transform,
+        display: getComputedStyle(marker.getElement()).display,
+        rect: marker.getElement().getBoundingClientRect()
+      });
+
+      // Add popup
+      const popup = new (maplibregl as any).Popup({ offset: 25 }).setHTML(`
+        <div style="padding: 12px; min-width: 200px;">
+          <div style="font-weight: 700; font-size: 15px; margin-bottom: 8px; color: #111827;">
+            Oficina central
+          </div>
+          <div style="font-size: 13px; color: #374151; line-height: 1.4;">
+            ${officeCoords[1].toFixed(6)}, ${officeCoords[0].toFixed(6)}
+          </div>
+        </div>
+      `);
+
+      marker.setPopup(popup);
+      officeMarkerRef.current = marker;
+    }
+
+    // Log marker counts
+    console.log('[MAP MARKER COUNT]', {
+      technicians: markersRef.current.size,
+      officeExists: !!officeMarkerRef.current,
+      officeConnected: officeMarkerRef.current?.getElement().isConnected
     });
   }
 

@@ -531,27 +531,25 @@ async function handleValidation(csvContent: string) {
         validation.data.longitude = geocode.longitude.toString();
         validation.coordinateSource = 'geocoded';
       } else {
-        // Failed: mark as invalid
+        // Failed: add warning but DO NOT mark as invalid
+        // Coordinates are OPTIONAL - client can be created without them
         validation.errors.push(
-          `No se pudo geocodificar la dirección: ${geocode.error || 'dirección no encontrada'}`
+          `⚠️ Advertencia: No se pudo geocodificar la dirección (${geocode.error || 'dirección no encontrada'}). El cliente se creará sin coordenadas.`
         );
-        validation.isValid = false;
+        // Keep isValid = true if no other errors exist
+        // The client will be imported with NULL coordinates
       }
     });
   }
 
-  // PHASE 3: Final validation - ensure all rows have coordinates
-  validationResults.forEach(result => {
-    if (result.isValid) {
-      const hasLat = result.data.latitude && result.data.latitude.trim() !== '';
-      const hasLng = result.data.longitude && result.data.longitude.trim() !== '';
-
-      if (!hasLat || !hasLng) {
-        result.errors.push('No se pudieron obtener coordenadas válidas para esta dirección');
-        result.isValid = false;
-      }
-    }
-  });
+  // PHASE 3: Removed - coordinates are OPTIONAL
+  // Clients can be created without coordinates if:
+  // - They were not provided in CSV
+  // - Geocoding failed or was not attempted
+  // - Address is valid
+  //
+  // Note: This allows clients with valid address but no coordinates
+  // to pass validation. The database schema allows NULL latitude/longitude.
 
   const validCount = validationResults.filter(r => r.isValid).length;
   const invalidCount = validationResults.length - validCount;
@@ -591,21 +589,31 @@ async function handleAtomicImport(
   // Prepare clients for staging
   const clientsToStage = validatedRows.map(result => {
     const row = result.data;
-    const lat = row.latitude ? parseFloat(row.latitude) : null;
-    const lng = row.longitude ? parseFloat(row.longitude) : null;
+    const lat = row.latitude && row.latitude.trim() ? parseFloat(row.latitude) : null;
+    const lng = row.longitude && row.longitude.trim() ? parseFloat(row.longitude) : null;
 
-    // Validate coordinates exist and are valid
-    if (lat === null || lng === null || isNaN(lat) || isNaN(lng)) {
+    // Validate coordinates IF PROVIDED
+    // Coordinates are OPTIONAL - allow NULL values
+    if (lat !== null && lng !== null) {
+      // Both coordinates provided - validate them
+      if (isNaN(lat) || isNaN(lng)) {
+        throw new Error(
+          `Fila ${result.row}: Las coordenadas proporcionadas no son números válidos.`
+        );
+      }
+
+      if (!hasValidCoordinates(lat, lng)) {
+        throw new Error(
+          `Fila ${result.row}: Las coordenadas están fuera del rango válido.`
+        );
+      }
+    } else if (lat !== null || lng !== null) {
+      // Only one coordinate provided - this should have been caught in validation
       throw new Error(
-        `Fila ${result.row}: No tiene coordenadas válidas. Este error no debería ocurrir después de la validación.`
+        `Fila ${result.row}: Debe proporcionar ambas coordenadas o ninguna.`
       );
     }
-
-    if (!hasValidCoordinates(lat, lng)) {
-      throw new Error(
-        `Fila ${result.row}: Las coordenadas están fuera del rango válido. Este error no debería ocurrir después de la validación.`
-      );
-    }
+    // else: both are null - OK, coordinates are optional
 
     return {
       import_id: importId,

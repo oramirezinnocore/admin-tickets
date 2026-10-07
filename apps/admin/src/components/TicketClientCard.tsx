@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { User, Phone, MapPin, Navigation, Copy, Check, ExternalLink } from 'lucide-react';
 import { Client, hasValidCoordinates } from '@wisper/shared';
 import ClientMapPreview from './ClientMapPreview';
@@ -12,6 +12,23 @@ interface TicketClientCardProps {
 export default function TicketClientCard({ client }: TicketClientCardProps) {
   const [copiedPhone, setCopiedPhone] = useState(false);
   const [copiedAddress, setCopiedAddress] = useState(false);
+
+  // RCA: Instance identity tracking
+  const instanceIdRef = useRef(
+    Math.random().toString(36).slice(2)
+  );
+
+  // RCA: Track every render
+  console.log('[TICKET-CLIENT-CARD-RENDER]', instanceIdRef.current, { clientId: client.id });
+
+  // RCA: Track mount/unmount
+  useEffect(() => {
+    console.log('[TICKET-CLIENT-CARD-MOUNT]', instanceIdRef.current);
+
+    return () => {
+      console.trace('[TICKET-CLIENT-CARD-UNMOUNT]', instanceIdRef.current);
+    };
+  }, []);
 
   const handleCopyPhone = async () => {
     if (!client.phone) return;

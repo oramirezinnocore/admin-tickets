@@ -108,6 +108,7 @@ export default function TicketDetailPage() {
   const [evidenceState, setEvidenceState] = useState<DataVerificationState>('loading');
   const [signatureState, setSignatureState] = useState<DataVerificationState>('loading');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
@@ -123,7 +124,7 @@ export default function TicketDetailPage() {
     // Auto refresh ticket data every 60 seconds
     const interval = setInterval(() => {
       setRefreshCounter(c => c + 1);
-      loadTicket(); // Refresh complete ticket to detect changes from Android
+      loadTicket({ background: true }); // BACKGROUND REFRESH - does NOT unmount components
       loadHistory(); // Refresh history
       loadEvidenceAndSignature(); // Refresh evidence and signature state
       if (ticket?.technician_id) {
@@ -140,9 +141,18 @@ export default function TicketDetailPage() {
     }
   }, [ticket?.technician_id]);
 
-  async function loadTicket() {
+  async function loadTicket(options?: { background?: boolean }) {
+    const background = options?.background ?? false;
+
     try {
-      setLoading(true);
+      if (background) {
+        console.log('[TICKET-DETAIL] loadTicket START - BACKGROUND REFRESH');
+        setRefreshing(true);
+      } else {
+        console.log('[TICKET-DETAIL] loadTicket START - INITIAL/POST-MUTATION');
+        setLoading(true);
+      }
+
       const { data, error } = await supabase
         .from('tickets')
         .select(`
@@ -156,12 +166,34 @@ export default function TicketDetailPage() {
         .eq('id', ticketId)
         .single();
 
-      if (error) throw error;
+      if (error) {
+        // Background refresh errors should NOT replace visible content
+        if (!background) {
+          throw error;
+        } else {
+          console.error('[TICKET-DETAIL] Background refresh error:', error);
+          return; // Keep existing ticket visible
+        }
+      }
+
+      console.log('[TICKET-DETAIL] loadTicket RECEIVED DATA', { background });
       setTicket(data as any);
+
+      // Clear any previous error on successful load
+      if (error === '') {
+        setError('');
+      }
     } catch (err: any) {
+      // Only set error for non-background loads
       setError(err.message);
     } finally {
-      setLoading(false);
+      if (background) {
+        console.log('[TICKET-DETAIL] loadTicket END - BACKGROUND REFRESH COMPLETE');
+        setRefreshing(false);
+      } else {
+        console.log('[TICKET-DETAIL] loadTicket END - INITIAL/POST-MUTATION COMPLETE');
+        setLoading(false);
+      }
     }
   }
 
