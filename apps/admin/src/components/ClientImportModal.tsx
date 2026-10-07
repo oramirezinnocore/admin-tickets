@@ -148,6 +148,18 @@ export default function ClientImportModal({
     setImporting(true);
     setError('');
 
+    console.log('[CLIENT-IMPORT-COMMIT-RCA] Starting import', {
+      importId,
+      validRowCount: validationResult.results.filter(r => r.isValid).length,
+      validatedRows: validationResult.results.filter(r => r.isValid).map(r => ({
+        row: r.row,
+        name: r.data.name,
+        hasLatitude: !!r.data.latitude,
+        hasLongitude: !!r.data.longitude,
+        coordinateSource: r.coordinateSource,
+      })),
+    });
+
     try {
       const response = await fetch('/api/clients/import', {
         method: 'POST',
@@ -164,9 +176,36 @@ export default function ClientImportModal({
 
       const data: ImportResponse = await response.json();
 
+      console.log('[CLIENT-IMPORT-COMMIT-RCA] Response received', {
+        importId,
+        httpStatus: response.status,
+        responseOk: response.ok,
+        responseBody: data,
+        hasError: !!data.error,
+        error: data.error,
+        details: (data as any).details,
+        imported: data.imported,
+      });
+
       if (!response.ok) {
+        // Log full error context
+        console.error('[CLIENT-IMPORT-COMMIT-RCA] Import failed', {
+          importId,
+          httpStatus: response.status,
+          error: data.error,
+          details: (data as any).details,
+          hint: (data as any).hint,
+          code: (data as any).code,
+          fullResponse: data,
+        });
+
         throw new Error(data.error || 'Error al importar clientes');
       }
+
+      console.log('[CLIENT-IMPORT-COMMIT-RCA] Import succeeded', {
+        importId,
+        imported: data.imported,
+      });
 
       setSuccessMessage(`✓ ${data.imported} clientes importados exitosamente`);
       setTimeout(() => {
@@ -174,6 +213,12 @@ export default function ClientImportModal({
         handleClose();
       }, 1500);
     } catch (err: any) {
+      console.error('[CLIENT-IMPORT-COMMIT-RCA] Exception caught', {
+        importId,
+        errorMessage: err.message,
+        errorStack: err.stack,
+        error: err,
+      });
       setError(err.message);
     } finally {
       setImporting(false);
