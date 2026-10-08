@@ -807,36 +807,91 @@ async function handleAtomicImport(
       });
     }
 
-    // Update job status to staging complete
-    await supabase
-      .from('client_import_jobs')
-      .update({ status: 'staging' })
-      .eq('import_id', importId);
-
-    console.log(`[Import] All records staged, calling atomic commit function`);
-    console.log('[CLIENT-IMPORT-API-RCA] 9. All staging batches complete, calling RPC', {
+    console.log(`[Import] All records staged successfully`);
+    console.log('[CLIENT-IMPORT-API-RCA] 9. All staging batches complete', {
       importId,
     });
 
-    // Verify staging count before commit
-    const { count: stagedCount } = await supabase
+    // Verify staging count before state transition
+    const { count: stagedCount, error: countError } = await supabase
       .from('client_import_staging')
       .select('*', { count: 'exact', head: true })
       .eq('import_id', importId);
 
-    console.log('[CLIENT-IMPORT-API-RCA] 10. Staging verification', {
+    if (countError) {
+      console.error('[CLIENT-IMPORT-API-RCA] 10. Staging count verification FAILED', {
+        importId,
+        error: countError,
+      });
+      throw new Error(`Error al verificar registros preparados: ${countError.message}`);
+    }
+
+    console.log('[CLIENT-IMPORT-API-RCA] 10. Staging count verified', {
       importId,
       stagedCount,
       expectedCount: clientsToStage.length,
       match: stagedCount === clientsToStage.length,
     });
 
+    if (stagedCount !== clientsToStage.length) {
+      throw new Error(
+        `Verificación de staging falló: esperados ${clientsToStage.length}, encontrados ${stagedCount}`
+      );
+    }
+
+    // CRITICAL: Transition job state from 'pending' to 'staging'
+    // This is REQUIRED before calling commit_client_import()
+    // The RPC will reject if status is not 'staging'
+    console.log('[CLIENT-IMPORT-API-RCA] 11. Transitioning job state pending → staging', {
+      importId,
+    });
+
+    const { data: updateData, error: updateError, count: updateCount } = await supabase
+      .from('client_import_jobs')
+      .update({ status: 'staging' })
+      .eq('import_id', importId)
+      .select();
+
+    if (updateError) {
+      console.error('[CLIENT-IMPORT-API-RCA] 12. Job state transition FAILED', {
+        importId,
+        errorCode: updateError.code,
+        errorMessage: updateError.message,
+        errorDetails: updateError.details,
+        errorHint: updateError.hint,
+        postgresErrorCode: (updateError as any).code,
+      });
+      throw new Error(
+        `Error al actualizar estado del trabajo de importación: ${updateError.message}`
+      );
+    }
+
+    if (!updateData || updateData.length === 0) {
+      console.error('[CLIENT-IMPORT-API-RCA] 12. Job state transition FAILED (no rows updated)', {
+        importId,
+        updateCount,
+        updateData,
+      });
+      throw new Error(
+        `No se pudo actualizar el estado del trabajo de importación. Verificar permisos y que el trabajo existe.`
+      );
+    }
+
+    console.log('[CLIENT-IMPORT-API-RCA] 12. Job state transition SUCCESS', {
+      importId,
+      previousStatus: 'pending',
+      newStatus: 'staging',
+      updatedRows: updateData.length,
+    });
+
     // Step 3: Commit atomically using database function
     // Note: Function derives caller identity from auth.uid(), not passed as parameter
-    console.log('[CLIENT-IMPORT-API-RCA] 11. Invoking RPC commit_client_import', {
+    console.log(`[Import] Job transitioned to staging, calling atomic commit function`);
+    console.log('[CLIENT-IMPORT-API-RCA] 13. Invoking RPC commit_client_import', {
       importId,
       rpcName: 'commit_client_import',
       parameters: { p_import_id: importId },
+      jobStatus: 'staging',
     });
 
     const { data: commitResult, error: commitError } = await supabase.rpc(
@@ -848,7 +903,7 @@ async function handleAtomicImport(
 
     if (commitError) {
       console.error(`[Import] Atomic commit failed:`, commitError);
-      console.error('[CLIENT-IMPORT-API-RCA] 12. RPC commit FAILED', {
+      console.error('[CLIENT-IMPORT-API-RCA] 14. RPC commit FAILED', {
         importId,
         errorCode: commitError.code,
         errorMessage: commitError.message,
@@ -860,7 +915,7 @@ async function handleAtomicImport(
     }
 
     console.log(`[Import] Atomic import ${importId} completed:`, commitResult);
-    console.log('[CLIENT-IMPORT-API-RCA] 12. RPC commit SUCCESS', {
+    console.log('[CLIENT-IMPORT-API-RCA] 14. RPC commit SUCCESS', {
       importId,
       result: commitResult,
     });
@@ -874,7 +929,7 @@ async function handleAtomicImport(
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
     console.error(`[Import] Import ${importId} failed:`, error);
-    console.error('[CLIENT-IMPORT-API-RCA] 13. EXCEPTION CAUGHT', {
+    console.error('[CLIENT-IMPORT-API-RCA] 15. EXCEPTION CAUGHT', {
       importId,
       errorMessage,
       errorType: error?.constructor?.name,
