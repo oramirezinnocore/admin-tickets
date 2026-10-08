@@ -292,9 +292,28 @@ export async function POST(request: NextRequest) {
 
     const token = authHeader.replace('Bearer ', '');
 
+    // Defensive validation: reject obviously invalid tokens
+    if (!token || token === 'undefined' || token === 'null' || token.trim() === '') {
+      console.error('[Import] Invalid token received:', { token: token.substring(0, 20) });
+      console.error('[IMPORT-AUTH-RCA-BACKEND] 401 Branch: B (Malformed token)');
+      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+    }
+
     // Create Supabase client with user's token
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+    // RCA instrumentation - Backend auth check
+    const projectRef = supabaseUrl ? new URL(supabaseUrl).hostname.split('.')[0] : 'unknown';
+    console.log('[IMPORT-AUTH-RCA-BACKEND] Auth check starting', {
+      hasAuthHeader: true,
+      scheme: 'Bearer',
+      tokenLength: token.length,
+      tokenPrefix: token.substring(0, 12),
+      supabaseProjectRef: projectRef,
+      supabaseHostname: supabaseUrl ? new URL(supabaseUrl).hostname : 'unknown',
+    });
+
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: {
         headers: {
@@ -309,7 +328,23 @@ export async function POST(request: NextRequest) {
       error: authError,
     } = await supabase.auth.getUser();
 
+    console.log('[IMPORT-AUTH-RCA-BACKEND] getUser result', {
+      getUserSuccess: !authError && Boolean(user),
+      hasUser: Boolean(user),
+      hasAuthError: Boolean(authError),
+      authErrorName: authError?.name,
+      authErrorMessage: authError?.message,
+      authErrorStatus: (authError as any)?.status,
+      userId: user?.id,
+      userEmail: user?.email,
+    });
+
     if (authError || !user) {
+      if (authError) {
+        console.error('[IMPORT-AUTH-RCA-BACKEND] 401 Branch: C (getUser returned authError)');
+      } else {
+        console.error('[IMPORT-AUTH-RCA-BACKEND] 401 Branch: D (getUser returned no user)');
+      }
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
     }
 
@@ -319,12 +354,22 @@ export async function POST(request: NextRequest) {
       .eq('id', user.id)
       .single();
 
+    console.log('[IMPORT-AUTH-RCA-BACKEND] Profile lookup result', {
+      authenticatedUserId: user.id,
+      profileFound: Boolean(profile),
+      profileRole: profile?.role,
+      isSuperAdmin: profile?.role === 'SUPER_ADMIN',
+    });
+
     if (!profile || profile.role !== 'SUPER_ADMIN') {
+      console.error('[IMPORT-AUTH-RCA-BACKEND] 403 (Authorization failed - not SUPER_ADMIN)');
       return NextResponse.json(
         { error: 'Acceso denegado. Solo SUPER_ADMIN puede importar clientes.' },
         { status: 403 }
       );
     }
+
+    console.log('[IMPORT-AUTH-RCA-BACKEND] Authorization successful - proceeding');
 
     // Parse request body
     const body = await request.json();

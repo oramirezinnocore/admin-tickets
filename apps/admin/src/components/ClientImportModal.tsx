@@ -111,13 +111,40 @@ export default function ClientImportModal({
     setError('');
 
     try {
+      // Check session before making authenticated request
+      const { data: { session } } = await supabase.auth.getSession();
+
+      // RCA instrumentation
+      console.log('[IMPORT-AUTH-RCA-FRONTEND] handleValidate session check', {
+        hasSession: Boolean(session),
+        hasAccessToken: Boolean(session?.access_token),
+        tokenPrefix: session?.access_token?.substring(0, 12),
+        tokenLength: session?.access_token?.length,
+        expiresAt: session?.expires_at,
+        userId: session?.user?.id,
+        userEmail: session?.user?.email,
+      });
+
+      if (!session?.access_token) {
+        setError('Tu sesión expiró. Por favor inicia sesión nuevamente.');
+        setValidating(false);
+        return;
+      }
+
       const csvContent = await file.text();
+
+      console.log('[IMPORT-AUTH-RCA-FRONTEND] Making validation request', {
+        hasAuthorizationHeader: true,
+        authorizationScheme: 'Bearer',
+        tokenLength: session.access_token.length,
+        tokenPrefix: session.access_token.substring(0, 12),
+      });
 
       const response = await fetch('/api/clients/import', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
+          'Authorization': `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
           action: 'validate',
@@ -148,6 +175,26 @@ export default function ClientImportModal({
     setImporting(true);
     setError('');
 
+    // Check session before making authenticated request
+    const { data: { session } } = await supabase.auth.getSession();
+
+    // RCA instrumentation
+    console.log('[IMPORT-AUTH-RCA-FRONTEND] handleImport session check', {
+      hasSession: Boolean(session),
+      hasAccessToken: Boolean(session?.access_token),
+      tokenPrefix: session?.access_token?.substring(0, 12),
+      tokenLength: session?.access_token?.length,
+      expiresAt: session?.expires_at,
+      userId: session?.user?.id,
+      userEmail: session?.user?.email,
+    });
+
+    if (!session?.access_token) {
+      setError('Tu sesión expiró. Por favor inicia sesión nuevamente.');
+      setImporting(false);
+      return;
+    }
+
     console.log('[CLIENT-IMPORT-COMMIT-RCA] Starting import', {
       importId,
       validRowCount: validationResult.results.filter(r => r.isValid).length,
@@ -160,12 +207,19 @@ export default function ClientImportModal({
       })),
     });
 
+    console.log('[IMPORT-AUTH-RCA-FRONTEND] Making import request', {
+      hasAuthorizationHeader: true,
+      authorizationScheme: 'Bearer',
+      tokenLength: session.access_token.length,
+      tokenPrefix: session.access_token.substring(0, 12),
+    });
+
     try {
       const response = await fetch('/api/clients/import', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
+          'Authorization': `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
           action: 'import',
