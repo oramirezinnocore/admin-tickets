@@ -152,6 +152,27 @@ export default function ClientImportModal({
         }),
       });
 
+      // Defensive: check content-type before parsing JSON
+      const contentType = response.headers.get('content-type');
+
+      // Handle non-JSON responses (HTML error pages from proxy/server)
+      if (!contentType || !contentType.includes('application/json')) {
+        if (response.status === 408 || response.status === 504) {
+          throw new Error(
+            'La validación tardó demasiado tiempo y no pudo completarse. ' +
+            'Esto puede ocurrir con archivos grandes que requieren geocodificación. ' +
+            'No se realizó ninguna importación. Intenta nuevamente o contacta al administrador.'
+          );
+        } else if (response.status >= 500) {
+          throw new Error(
+            'El servidor encontró un error al procesar la solicitud. ' +
+            'Por favor intenta nuevamente. Si el problema persiste, contacta al administrador.'
+          );
+        } else {
+          throw new Error(`Error del servidor (${response.status}). Por favor intenta nuevamente.`);
+        }
+      }
+
       const data = await response.json();
 
       if (!response.ok) {
@@ -163,7 +184,12 @@ export default function ClientImportModal({
       const newImportId = `import_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
       setImportId(newImportId);
     } catch (err: any) {
-      setError(err.message);
+      // Handle network/fetch errors
+      if (err.name === 'TypeError' && err.message.includes('fetch')) {
+        setError('Error de conexión. Verifica tu conexión a internet e intenta nuevamente.');
+      } else {
+        setError(err.message || 'Error desconocido al validar el archivo');
+      }
     } finally {
       setValidating(false);
     }
@@ -228,6 +254,29 @@ export default function ClientImportModal({
         }),
       });
 
+      // Defensive: check content-type before parsing JSON
+      const contentType = response.headers.get('content-type');
+
+      // Handle non-JSON responses (HTML error pages from proxy/server)
+      if (!contentType || !contentType.includes('application/json')) {
+        if (response.status === 408 || response.status === 504) {
+          throw new Error(
+            'No fue posible confirmar el resultado de la importación debido a que la operación tardó demasiado. ' +
+            'El estado de la importación no pudo verificarse. ' +
+            'Por favor verifica si los clientes fueron importados antes de volver a intentarlo. ' +
+            'Si el problema persiste, contacta al administrador.'
+          );
+        } else if (response.status >= 500) {
+          throw new Error(
+            'El servidor encontró un error al procesar la importación. ' +
+            'Por favor verifica el estado de los clientes antes de reintentar. ' +
+            'Si el problema persiste, contacta al administrador.'
+          );
+        } else {
+          throw new Error(`Error del servidor (${response.status}). Por favor intenta nuevamente.`);
+        }
+      }
+
       const data: ImportResponse = await response.json();
 
       console.log('[CLIENT-IMPORT-COMMIT-RCA] Response received', {
@@ -273,7 +322,13 @@ export default function ClientImportModal({
         errorStack: err.stack,
         error: err,
       });
-      setError(err.message);
+
+      // Handle network/fetch errors
+      if (err.name === 'TypeError' && err.message.includes('fetch')) {
+        setError('Error de conexión. Verifica tu conexión a internet e intenta nuevamente.');
+      } else {
+        setError(err.message || 'Error desconocido al importar clientes');
+      }
     } finally {
       setImporting(false);
     }
