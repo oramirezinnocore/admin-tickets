@@ -4,9 +4,12 @@ import Papa from 'papaparse';
 import { hasValidCoordinates } from '@wisper/shared';
 
 const IMPORT_LIMIT = 10000;
-const GEOCODE_BATCH_SIZE = 5; // Max concurrent geocoding requests
-const GEOCODE_LIMIT = 50; // Max addresses to geocode synchronously (fits in 60s timeout)
+const GEOCODE_CONCURRENCY = 5; // Max concurrent geocoding requests (network-level batching)
 const STAGING_BATCH_SIZE = 500; // Staging insert batch size
+
+// Officially supported CSV headers (case-insensitive after transformation)
+const REQUIRED_HEADERS = ['name', 'address'];
+const OPTIONAL_HEADERS = ['phone', 'reference', 'coordinates', 'latitude', 'longitude'];
 
 interface ImportRow {
   name: string;
@@ -265,16 +268,25 @@ async function geocodeAddress(address: string): Promise<GeocodeResult> {
 
 /**
  * Process items in batches with concurrency control
+ * Each batch is processed concurrently, but batches are processed sequentially
  */
 async function processBatch<T, R>(
   items: T[],
   batchSize: number,
-  processor: (item: T) => Promise<R>
+  processor: (item: T) => Promise<R>,
+  logProgress: boolean = false
 ): Promise<R[]> {
   const results: R[] = [];
+  const totalBatches = Math.ceil(items.length / batchSize);
 
   for (let i = 0; i < items.length; i += batchSize) {
     const batch = items.slice(i, i + batchSize);
+    const batchNumber = Math.floor(i / batchSize) + 1;
+
+    if (logProgress) {
+      console.log(`[CLIENT-IMPORT-GEOCODE] Processing batch ${batchNumber}/${totalBatches} (${batch.length} addresses)`);
+    }
+
     const batchResults = await Promise.all(batch.map(processor));
     results.push(...batchResults);
   }
@@ -430,29 +442,54 @@ async function handleValidation(csvContent: string) {
     );
   }
 
-  // Validate headers
+  // Validate headers to prevent silent data loss
   const headers = parseResult.meta.fields || [];
-  const requiredHeaders = ['name', 'address'];
-  const optionalHeaders = ['phone', 'reference', 'coordinates', 'latitude', 'longitude'];
-  const validHeaders = [...requiredHeaders, ...optionalHeaders];
+  const validHeaders = [...REQUIRED_HEADERS, ...OPTIONAL_HEADERS];
 
-  const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
+  // Check for missing required headers
+  const missingHeaders = REQUIRED_HEADERS.filter(h => !headers.includes(h));
   if (missingHeaders.length > 0) {
     return NextResponse.json(
       {
-        error: `El archivo debe contener las columnas: ${requiredHeaders.join(', ')}`,
+        error: `El archivo CSV debe contener las columnas requeridas: ${REQUIRED_HEADERS.join(', ')}`,
         missing: missingHeaders,
+        suggestion: 'Verifica que el archivo CSV siga la plantilla oficial.',
       },
       { status: 400 }
     );
   }
 
+  // Check for unrecognized headers (prevents silent data loss)
   const invalidHeaders = headers.filter(h => !validHeaders.includes(h));
   if (invalidHeaders.length > 0) {
+    // Generate helpful suggestions for common typos
+    const suggestions: string[] = [];
+    invalidHeaders.forEach(invalid => {
+      if (invalid === 'telefono') {
+        suggestions.push(`'${invalid}' → usa 'phone' según la plantilla CSV`);
+      } else if (invalid === 'nombre') {
+        suggestions.push(`'${invalid}' → usa 'name' según la plantilla CSV`);
+      } else if (invalid === 'direccion' || invalid === 'dirección') {
+        suggestions.push(`'${invalid}' → usa 'address' según la plantilla CSV`);
+      } else if (invalid === 'referencia') {
+        suggestions.push(`'${invalid}' → usa 'reference' según la plantilla CSV`);
+      } else if (invalid === 'coordenadas') {
+        suggestions.push(`'${invalid}' → usa 'coordinates' según la plantilla CSV`);
+      } else if (invalid === 'latitud') {
+        suggestions.push(`'${invalid}' → usa 'latitude' según la plantilla CSV`);
+      } else if (invalid === 'longitud') {
+        suggestions.push(`'${invalid}' → usa 'longitude' según la plantilla CSV`);
+      } else {
+        suggestions.push(`'${invalid}' no es una columna válida`);
+      }
+    });
+
     return NextResponse.json(
       {
-        error: `El archivo contiene columnas no reconocidas: ${invalidHeaders.join(', ')}`,
-        note: `Columnas permitidas: ${validHeaders.join(', ')}`,
+        error: `El archivo contiene columnas no reconocidas que causarían pérdida de datos: ${invalidHeaders.join(', ')}`,
+        columnsAllowed: validHeaders.join(', '),
+        suggestions: suggestions.join('; '),
+        note: 'Los nombres de columnas deben coincidir exactamente con la plantilla CSV oficial.',
       },
       { status: 400 }
     );
@@ -543,30 +580,32 @@ async function handleValidation(csvContent: string) {
 
   // PHASE 2: Geocode addresses for rows without coordinates
   if (rowsNeedingGeocode.length > 0) {
-    // Check geocoding limit for production safety
-    if (rowsNeedingGeocode.length > GEOCODE_LIMIT) {
-      return NextResponse.json(
-        {
-          error: `Demasiadas direcciones requieren geocodificación: ${rowsNeedingGeocode.length}`,
-          details: `El límite es ${GEOCODE_LIMIT} direcciones sin coordenadas. Por favor proporciona coordenadas (decimales o DMS) en el CSV para importaciones grandes.`,
-          suggestion: 'Puedes dividir el archivo en lotes más pequeños o proporcionar coordenadas para los ${rowsNeedingGeocode.length} clientes.',
-        },
-        { status: 400 }
-      );
-    }
+    const networkChunks = Math.ceil(rowsNeedingGeocode.length / GEOCODE_CONCURRENCY);
 
-    console.log(`[Import] Geocoding ${rowsNeedingGeocode.length} addresses...`);
+    console.log('[CLIENT-IMPORT-GEOCODE] Starting geocoding phase', {
+      totalRows: validationResults.length,
+      coordinatesProvided: validationResults.length - rowsNeedingGeocode.length,
+      coordinatesMissingWithAddress: rowsNeedingGeocode.length,
+      networkConcurrency: GEOCODE_CONCURRENCY,
+      numberOfNetworkChunks: networkChunks,
+    });
+
+    console.log(`[Import] Geocoding ${rowsNeedingGeocode.length} addresses with max ${GEOCODE_CONCURRENCY} concurrent requests...`);
 
     const geocodeResults = await processBatch(
       rowsNeedingGeocode,
-      GEOCODE_BATCH_SIZE,
+      GEOCODE_CONCURRENCY,
       async item => {
         const result = await geocodeAddress(item.address);
         return { ...item, geocode: result };
-      }
+      },
+      true // Enable batch progress logging
     );
 
     // Apply geocoding results
+    let geocodingSuccess = 0;
+    let geocodingFailed = 0;
+
     geocodeResults.forEach(({ index, geocode }) => {
       const validation = validationResults[index];
 
@@ -575,15 +614,23 @@ async function handleValidation(csvContent: string) {
         validation.data.latitude = geocode.latitude.toString();
         validation.data.longitude = geocode.longitude.toString();
         validation.coordinateSource = 'geocoded';
+        geocodingSuccess++;
       } else {
         // Failed: add warning but DO NOT mark as invalid
         // Coordinates are OPTIONAL - client can be created without them
         validation.errors.push(
           `⚠️ Advertencia: No se pudo geocodificar la dirección (${geocode.error || 'dirección no encontrada'}). El cliente se creará sin coordenadas.`
         );
+        geocodingFailed++;
         // Keep isValid = true if no other errors exist
         // The client will be imported with NULL coordinates
       }
+    });
+
+    console.log('[CLIENT-IMPORT-GEOCODE] Geocoding complete', {
+      attempted: rowsNeedingGeocode.length,
+      geocodingSuccess,
+      geocodingFailed,
     });
   }
 
