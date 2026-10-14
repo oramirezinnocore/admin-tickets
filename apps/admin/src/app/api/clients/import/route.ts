@@ -241,12 +241,12 @@ async function geocodeAddress(address: string): Promise<GeocodeResult> {
 
     const data = await response.json();
 
-    // Check if we got results
-    if (!data || !Array.isArray(data) || data.length === 0) {
+    // Check if we got results from /api/geocode (returns { results: [...] })
+    if (!data || !Array.isArray(data.results) || data.results.length === 0) {
       return { success: false, error: 'Address not found' };
     }
 
-    const firstResult = data[0];
+    const firstResult = data.results[0];
     if (
       typeof firstResult.latitude === 'number' &&
       typeof firstResult.longitude === 'number' &&
