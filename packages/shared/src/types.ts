@@ -15,7 +15,7 @@ export interface Profile {
 export interface Client {
   id: string;
   name: string;
-  address: string;
+  address: string | null; // Optional - can be NULL if not provided
   reference: string | null;
   latitude: number | null;
   longitude: number | null;

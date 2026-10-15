@@ -84,7 +84,7 @@ export default function ClientsPage() {
         c =>
           c.name.toLowerCase().includes(query) ||
           c.phone?.toLowerCase().includes(query) ||
-          c.address.toLowerCase().includes(query)
+          c.address?.toLowerCase().includes(query)
       );
     }
 
@@ -222,7 +222,7 @@ export default function ClientsPage() {
                   <td className="px-6 py-4 whitespace-nowrap">
                     {client.phone || '-'}
                   </td>
-                  <td className="px-6 py-4">{client.address}</td>
+                  <td className="px-6 py-4">{client.address || '-'}</td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span
                       className={`px-2 py-1 rounded-full text-xs ${
@@ -340,7 +340,7 @@ function ClientFormModal({ isOpen, onClose, onSuccess, client }: ClientFormModal
       setFormData({
         name: client.name,
         phone: client.phone || '',
-        address: client.address,
+        address: client.address || '',
         reference: client.reference || '',
         latitude: client.latitude?.toString() || '',
         longitude: client.longitude?.toString() || '',
