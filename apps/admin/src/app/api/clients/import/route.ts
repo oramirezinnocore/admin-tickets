@@ -24,7 +24,8 @@ interface ImportRow {
 interface ValidationResult {
   row: number;
   data: ImportRow;
-  errors: string[];
+  errors: string[]; // Blocking errors - prevent import
+  warnings: string[]; // Non-blocking warnings - client can still be imported
   isValid: boolean;
   coordinateSource?: 'csv' | 'csv-dms' | 'geocoded';
   originalCoordinates?: string;
@@ -501,20 +502,25 @@ async function handleValidation(csvContent: string) {
   const rowsNeedingGeocode: Array<{ index: number; address: string }> = [];
 
   rows.forEach((row, index) => {
-    const errors: string[] = [];
+    const errors: string[] = []; // Blocking errors
+    const warnings: string[] = []; // Non-blocking warnings
     const rowNumber = index + 2; // +1 for 0-index, +1 for header row
 
     // Validate required fields
+    // REQUIRED: Name is the only required field for client import
     if (!row.name || !row.name.trim()) {
       errors.push('El nombre es obligatorio');
     }
 
-    if (!row.address || !row.address.trim()) {
-      errors.push('La dirección es obligatoria');
-    }
+    // Address is OPTIONAL - blank address is acceptable
+    // If blank, no geocoding will be attempted and address remains NULL
 
     // Check for duplicates within the file (based on name+address)
-    if (row.name && row.address) {
+    // Only check duplicates if both name and address are present
+    // NOTE: If address is blank, duplicate checking is SKIPPED
+    // This allows multiple clients with the same name but no address
+    // (e.g., "Juan Pérez" with blank address can appear multiple times)
+    if (row.name && row.name.trim() && row.address && row.address.trim()) {
       const key = `${row.name.trim().toLowerCase()}|${row.address.trim().toLowerCase()}`;
       if (seenKeys.has(key)) {
         errors.push('Cliente duplicado dentro del archivo (mismo nombre y dirección)');
@@ -524,28 +530,41 @@ async function handleValidation(csvContent: string) {
     }
 
     // Coordinate validation logic - Priority: decimal > DMS > geocoding
+    // IMPORTANT: Invalid/unknown/partial coordinates are WARNINGS, not ERRORS
+    // Client data is primary, location data is optional/best-effort
     const hasLat = row.latitude && row.latitude.trim() !== '';
     const hasLng = row.longitude && row.longitude.trim() !== '';
     const hasDMS = row.coordinates && row.coordinates.trim() !== '';
 
     let coordinateSource: 'csv' | 'csv-dms' | 'geocoded' | undefined = undefined;
     let originalCoordinates: string | undefined = undefined;
+    let coordinatesUsable = false;
 
     if (hasLat && hasLng) {
       // PRIORITY 1: Decimal coordinates provided - validate and use
       const lat = parseFloat(row.latitude!);
       const lng = parseFloat(row.longitude!);
 
-      if (isNaN(lat) || isNaN(lng) || !hasValidCoordinates(lat, lng)) {
-        errors.push('Las coordenadas decimales proporcionadas no son válidas');
+      if (isNaN(lat) || isNaN(lng)) {
+        // Cannot parse as numbers - treat as unusable
+        warnings.push('Las coordenadas proporcionadas no son números válidos. El cliente se importará sin coordenadas.');
+        row.latitude = '';
+        row.longitude = '';
+      } else if (!hasValidCoordinates(lat, lng)) {
+        // Out of valid geographic range
+        warnings.push('Las coordenadas están fuera del rango válido. El cliente se importará sin coordenadas.');
+        row.latitude = '';
+        row.longitude = '';
       } else {
+        // Valid decimal coordinates
         coordinateSource = 'csv';
+        coordinatesUsable = true;
       }
     } else if (hasLat || hasLng) {
-      // Partial decimal coordinates - invalid
-      errors.push(
-        'Debe proporcionar ambas coordenadas (latitude y longitude) o ninguna. Solo una coordenada no es válida.'
-      );
+      // Partial decimal coordinates - treat as unusable
+      warnings.push('Solo se proporcionó latitud o longitud. El cliente se importará sin coordenadas.');
+      row.latitude = '';
+      row.longitude = '';
     } else if (hasDMS) {
       // PRIORITY 2: DMS coordinates provided - parse and convert
       const dmsResult = parseDMS(row.coordinates!);
@@ -556,12 +575,15 @@ async function handleValidation(csvContent: string) {
         row.longitude = dmsResult.longitude.toString();
         coordinateSource = 'csv-dms';
         originalCoordinates = row.coordinates!.trim();
+        coordinatesUsable = true;
       } else {
-        // Failed to parse DMS
-        errors.push(`Coordenadas DMS inválidas: ${dmsResult.error || 'formato no reconocido'}`);
+        // Failed to parse DMS - treat as unusable
+        warnings.push(`Formato de coordenadas no reconocido: ${dmsResult.error || 'formato no soportado'}. El cliente se importará sin coordenadas.`);
       }
-    } else if (row.address && row.address.trim()) {
-      // PRIORITY 3: No coordinates provided - will need geocoding
+    }
+
+    // PRIORITY 3: No usable coordinates + valid address = geocoding candidate
+    if (!coordinatesUsable && row.address && row.address.trim()) {
       rowsNeedingGeocode.push({
         index,
         address: row.address.trim(),
@@ -572,7 +594,8 @@ async function handleValidation(csvContent: string) {
       row: rowNumber,
       data: row,
       errors,
-      isValid: errors.length === 0,
+      warnings,
+      isValid: errors.length === 0, // Only ERRORS block import, not warnings
       coordinateSource,
       originalCoordinates,
     });
@@ -616,14 +639,13 @@ async function handleValidation(csvContent: string) {
         validation.coordinateSource = 'geocoded';
         geocodingSuccess++;
       } else {
-        // Failed: add warning but DO NOT mark as invalid
+        // Failed: add WARNING (not error) - client can still be imported
         // Coordinates are OPTIONAL - client can be created without them
-        validation.errors.push(
-          `⚠️ Advertencia: No se pudo geocodificar la dirección (${geocode.error || 'dirección no encontrada'}). El cliente se creará sin coordenadas.`
+        validation.warnings.push(
+          `No se pudo geocodificar la dirección (${geocode.error || 'dirección no encontrada'}). El cliente se importará sin coordenadas.`
         );
         geocodingFailed++;
-        // Keep isValid = true if no other errors exist
-        // The client will be imported with NULL coordinates
+        // isValid remains true - geocoding failure does NOT block import
       }
     });
 
@@ -645,14 +667,18 @@ async function handleValidation(csvContent: string) {
 
   const validCount = validationResults.filter(r => r.isValid).length;
   const invalidCount = validationResults.length - validCount;
+  const validWithWarnings = validationResults.filter(r => r.isValid && r.warnings.length > 0).length;
+  const validWithoutWarnings = validCount - validWithWarnings;
 
   return NextResponse.json({
     success: true,
     total: rows.length,
     valid: validCount,
     invalid: invalidCount,
+    validWithWarnings, // Valid rows that have location warnings
+    validWithoutWarnings, // Perfect rows with no issues
     results: validationResults,
-    canImport: invalidCount === 0, // Only allow import if all rows are valid
+    canImport: invalidCount === 0, // Only allow import if all rows are valid (warnings don't block)
   });
 }
 
@@ -716,7 +742,7 @@ async function handleAtomicImport(
     return {
       import_id: importId,
       name: row.name.trim(),
-      address: row.address.trim(),
+      address: row.address?.trim() || null, // NULL if blank/missing
       phone: row.phone?.trim() || null,
       reference: row.reference?.trim() || null,
       latitude: lat,

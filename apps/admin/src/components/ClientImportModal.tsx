@@ -14,7 +14,8 @@ interface ValidationResult {
     latitude?: string;
     longitude?: string;
   };
-  errors: string[];
+  errors: string[]; // Blocking errors
+  warnings: string[]; // Non-blocking warnings
   isValid: boolean;
   coordinateSource?: 'csv' | 'csv-dms' | 'geocoded';
   originalCoordinates?: string;
@@ -25,6 +26,8 @@ interface ValidationResponse {
   total: number;
   valid: number;
   invalid: number;
+  validWithWarnings: number; // Valid rows with location warnings
+  validWithoutWarnings: number; // Perfect rows
   results: ValidationResult[];
   canImport: boolean;
 }
@@ -461,18 +464,24 @@ Pedro Martínez,Blvd. García de León Morelia,3129998877,Local 5,,,19.7038,-101
         {/* Validation Results */}
         {validationResult && (
           <div className="space-y-4">
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-4 gap-3">
               <div className="bg-gray-50 rounded-md p-3 text-center">
                 <p className="text-2xl font-bold text-gray-900">
                   {validationResult.total}
                 </p>
-                <p className="text-xs text-gray-600">Registros</p>
+                <p className="text-xs text-gray-600">Total</p>
               </div>
               <div className="bg-green-50 rounded-md p-3 text-center">
                 <p className="text-2xl font-bold text-green-900">
-                  {validationResult.valid}
+                  {validationResult.validWithoutWarnings}
                 </p>
-                <p className="text-xs text-green-700">Válidos</p>
+                <p className="text-xs text-green-700">Perfectos</p>
+              </div>
+              <div className="bg-yellow-50 rounded-md p-3 text-center">
+                <p className="text-2xl font-bold text-yellow-900">
+                  {validationResult.validWithWarnings}
+                </p>
+                <p className="text-xs text-yellow-700">Con advertencias</p>
               </div>
               <div className="bg-red-50 rounded-md p-3 text-center">
                 <p className="text-2xl font-bold text-red-900">
@@ -511,69 +520,85 @@ Pedro Martínez,Blvd. García de León Morelia,3129998877,Local 5,,,19.7038,-101
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {validationResult.results.map(result => (
-                    <tr key={result.row} className={result.isValid ? '' : 'bg-red-50'}>
-                      <td className="px-3 py-2 text-sm text-gray-900">{result.row}</td>
-                      <td className="px-3 py-2 text-sm text-gray-900">
-                        {result.data.name}
-                      </td>
-                      <td className="px-3 py-2 text-sm text-gray-500">
-                        {result.data.address}
-                      </td>
-                      <td className="px-3 py-2 text-sm text-gray-500">
-                        {result.data.latitude ? (
-                          <span className="text-xs">
-                            {parseFloat(result.data.latitude).toFixed(6)}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-gray-400">-</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-sm text-gray-500">
-                        {result.data.longitude ? (
-                          <span className="text-xs">
-                            {parseFloat(result.data.longitude).toFixed(6)}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-gray-400">-</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-sm text-gray-500">
-                        {result.coordinateSource === 'csv' && (
-                          <span className="text-xs text-gray-700 font-medium">CSV decimal</span>
-                        )}
-                        {result.coordinateSource === 'csv-dms' && (
-                          <div className="flex flex-col">
-                            <span className="text-xs text-purple-700 font-medium">CSV DMS</span>
-                            {result.originalCoordinates && (
-                              <span className="text-xs text-gray-500" title={result.originalCoordinates}>
-                                {result.originalCoordinates.length > 20
-                                  ? result.originalCoordinates.substring(0, 20) + '...'
-                                  : result.originalCoordinates}
-                              </span>
-                            )}
-                          </div>
-                        )}
-                        {result.coordinateSource === 'geocoded' && (
-                          <span className="text-xs text-blue-600 font-medium">🌐 Geocodificado</span>
-                        )}
-                        {!result.coordinateSource && (
-                          <span className="text-xs text-gray-400">-</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-sm">
-                        {result.isValid ? (
-                          <span className="text-green-600 font-medium">✓ Válido</span>
-                        ) : (
-                          <div className="text-red-600 text-xs">
-                            {result.errors.map((err, idx) => (
-                              <div key={idx}>• {err}</div>
-                            ))}
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                  {validationResult.results.map(result => {
+                    const bgColor = !result.isValid
+                      ? 'bg-red-50'
+                      : result.warnings.length > 0
+                      ? 'bg-yellow-50'
+                      : '';
+
+                    return (
+                      <tr key={result.row} className={bgColor}>
+                        <td className="px-3 py-2 text-sm text-gray-900">{result.row}</td>
+                        <td className="px-3 py-2 text-sm text-gray-900">
+                          {result.data.name || <span className="text-gray-400 italic">Sin nombre</span>}
+                        </td>
+                        <td className="px-3 py-2 text-sm text-gray-500">
+                          {result.data.address || <span className="text-gray-400 italic">Sin dirección</span>}
+                        </td>
+                        <td className="px-3 py-2 text-sm text-gray-500">
+                          {result.data.latitude ? (
+                            <span className="text-xs">
+                              {parseFloat(result.data.latitude).toFixed(6)}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400">-</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-sm text-gray-500">
+                          {result.data.longitude ? (
+                            <span className="text-xs">
+                              {parseFloat(result.data.longitude).toFixed(6)}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400">-</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-sm text-gray-500">
+                          {result.coordinateSource === 'csv' && (
+                            <span className="text-xs text-gray-700 font-medium">CSV decimal</span>
+                          )}
+                          {result.coordinateSource === 'csv-dms' && (
+                            <div className="flex flex-col">
+                              <span className="text-xs text-purple-700 font-medium">CSV DMS</span>
+                              {result.originalCoordinates && (
+                                <span className="text-xs text-gray-500" title={result.originalCoordinates}>
+                                  {result.originalCoordinates.length > 20
+                                    ? result.originalCoordinates.substring(0, 20) + '...'
+                                    : result.originalCoordinates}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {result.coordinateSource === 'geocoded' && (
+                            <span className="text-xs text-blue-600 font-medium">🌐 Geocodificado</span>
+                          )}
+                          {!result.coordinateSource && (
+                            <span className="text-xs text-gray-400">-</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-sm">
+                          {!result.isValid ? (
+                            <div className="text-red-600 text-xs space-y-1">
+                              <div className="font-medium">✗ Error</div>
+                              {result.errors.map((err, idx) => (
+                                <div key={idx}>• {err}</div>
+                              ))}
+                            </div>
+                          ) : result.warnings.length > 0 ? (
+                            <div className="text-yellow-700 text-xs space-y-1">
+                              <div className="font-medium">⚠ Válido con advertencias</div>
+                              {result.warnings.map((warn, idx) => (
+                                <div key={idx} className="text-yellow-600">• {warn}</div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-green-600 font-medium">✓ Válido</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -585,6 +610,18 @@ Pedro Martínez,Blvd. García de León Morelia,3129998877,Local 5,,,19.7038,-101
                 </p>
                 <p className="text-xs text-red-700 mt-1">
                   Corrige los errores en el archivo CSV e inténtalo nuevamente.
+                </p>
+              </div>
+            )}
+
+            {validationResult.canImport && validationResult.validWithWarnings > 0 && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
+                <p className="text-sm text-yellow-800 font-medium">
+                  ⚠ {validationResult.validWithWarnings} cliente(s) se importará(n) sin información de ubicación
+                </p>
+                <p className="text-xs text-yellow-700 mt-1">
+                  Los datos de ubicación no pudieron procesarse, pero los clientes son válidos y se pueden importar.
+                  Puedes agregar las coordenadas manualmente después de la importación.
                 </p>
               </div>
             )}
