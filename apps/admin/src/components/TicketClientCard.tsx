@@ -122,7 +122,7 @@ export default function TicketClientCard({ client }: TicketClientCardProps) {
             </dt>
             <div className="flex items-start gap-2">
               <dd className="flex-1 text-sm text-gray-900 leading-relaxed">
-                {client.address}
+                {client.address || '-'}
               </dd>
               <button
                 onClick={handleCopyAddress}
@@ -204,7 +204,7 @@ export default function TicketClientCard({ client }: TicketClientCardProps) {
                   <p className="text-sm text-gray-600 mb-2">Ubicación no disponible</p>
                   {client.address && (
                     <button
-                      onClick={() => searchAddressInGoogleMaps(client.address)}
+                      onClick={() => searchAddressInGoogleMaps(client.address!)}
                       className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 font-medium transition-colors duration-150 focus:outline-none focus:underline"
                     >
                       <span>Buscar dirección en Google Maps</span>

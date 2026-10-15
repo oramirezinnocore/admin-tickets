@@ -1357,7 +1357,7 @@ export default function MapPage() {
                                   {ticket.client.name}
                                 </div>
                                 <div className="text-xs text-gray-500 truncate">
-                                  {ticket.client.address}
+                                  {ticket.client.address || '-'}
                                 </div>
                                 {!hasLocation && (
                                   <div className="mt-1">
