@@ -4,7 +4,6 @@ import Papa from 'papaparse';
 import { hasValidCoordinates } from '@wisper/shared';
 
 const IMPORT_LIMIT = 10000;
-const GEOCODE_CONCURRENCY = 5; // Max concurrent geocoding requests (network-level batching)
 const STAGING_BATCH_SIZE = 500; // Staging insert batch size
 
 // Officially supported CSV headers (case-insensitive after transformation)
@@ -27,7 +26,7 @@ interface ValidationResult {
   errors: string[]; // Blocking errors - prevent import
   warnings: string[]; // Non-blocking warnings - client can still be imported
   isValid: boolean;
-  coordinateSource?: 'csv' | 'csv-dms' | 'geocoded';
+  coordinateSource?: 'csv' | 'csv-dms'; // geocoded removed - no external geocoding in bulk import
   originalCoordinates?: string;
 }
 
@@ -222,6 +221,10 @@ function parseDMS(coordinatesStr: string): DMSParseResult {
 
 /**
  * Geocode a single address using the existing /api/geocode endpoint
+ *
+ * NOTE: This function is preserved as a utility but is NOT used in bulk import
+ * to avoid performance bottlenecks from external API dependencies.
+ * Bulk imports rely only on CSV-provided coordinates (decimal or DMS).
  */
 async function geocodeAddress(address: string): Promise<GeocodeResult> {
   try {
@@ -296,6 +299,12 @@ async function processBatch<T, R>(
 }
 
 export async function POST(request: NextRequest) {
+  // Generate unique request ID for tracing
+  const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  const requestStart = Date.now();
+
+  console.log(`[CLIENT-IMPORT][${requestId}] START`);
+
   try {
     // Get auth token from header
     const authHeader = request.headers.get('Authorization');
@@ -390,13 +399,13 @@ export async function POST(request: NextRequest) {
 
     if (action === 'validate') {
       // PHASE 1: Validate CSV content
-      return await handleValidation(csvContent);
+      return await handleValidation(requestId, csvContent);
     } else if (action === 'import') {
       // PHASE 2: Import validated rows atomically
       if (!importId || typeof importId !== 'string') {
         return NextResponse.json({ error: 'Import ID requerido' }, { status: 400 });
       }
-      return await handleAtomicImport(supabase, user.id, importId, validatedRows);
+      return await handleAtomicImport(requestId, supabase, user.id, importId, validatedRows);
     } else {
       return NextResponse.json({ error: 'Acción inválida' }, { status: 400 });
     }
@@ -408,13 +417,17 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function handleValidation(csvContent: string) {
+async function handleValidation(requestId: string, csvContent: string) {
+  const phaseStart = Date.now();
+
   // Parse CSV
   const parseResult = Papa.parse<ImportRow>(csvContent, {
     header: true,
     skipEmptyLines: true,
     transformHeader: (header: string) => header.trim().toLowerCase(),
   });
+
+  console.log(`[CLIENT-IMPORT][${requestId}] PARSE_COMPLETE rows=${parseResult.data.length} elapsedMs=${Date.now() - phaseStart}`);
 
   if (parseResult.errors.length > 0) {
     return NextResponse.json(
@@ -497,9 +510,9 @@ async function handleValidation(csvContent: string) {
   }
 
   // PHASE 1: Initial validation
+  const validationStart = Date.now();
   const validationResults: ValidationResult[] = [];
   const seenKeys = new Set<string>();
-  const rowsNeedingGeocode: Array<{ index: number; address: string }> = [];
 
   rows.forEach((row, index) => {
     const errors: string[] = []; // Blocking errors
@@ -529,16 +542,16 @@ async function handleValidation(csvContent: string) {
       }
     }
 
-    // Coordinate validation logic - Priority: decimal > DMS > geocoding
+    // Coordinate validation logic - Priority: decimal > DMS > NULL
     // IMPORTANT: Invalid/unknown/partial coordinates are WARNINGS, not ERRORS
     // Client data is primary, location data is optional/best-effort
+    // NO EXTERNAL GEOCODING - bulk import must be fast and not depend on external services
     const hasLat = row.latitude && row.latitude.trim() !== '';
     const hasLng = row.longitude && row.longitude.trim() !== '';
     const hasDMS = row.coordinates && row.coordinates.trim() !== '';
 
-    let coordinateSource: 'csv' | 'csv-dms' | 'geocoded' | undefined = undefined;
+    let coordinateSource: 'csv' | 'csv-dms' | undefined = undefined;
     let originalCoordinates: string | undefined = undefined;
-    let coordinatesUsable = false;
 
     if (hasLat && hasLng) {
       // PRIORITY 1: Decimal coordinates provided - validate and use
@@ -546,22 +559,21 @@ async function handleValidation(csvContent: string) {
       const lng = parseFloat(row.longitude!);
 
       if (isNaN(lat) || isNaN(lng)) {
-        // Cannot parse as numbers - treat as unusable
+        // Cannot parse as numbers - set NULL
         warnings.push('Las coordenadas proporcionadas no son números válidos. El cliente se importará sin coordenadas.');
         row.latitude = '';
         row.longitude = '';
       } else if (!hasValidCoordinates(lat, lng)) {
-        // Out of valid geographic range
+        // Out of valid geographic range - set NULL
         warnings.push('Las coordenadas están fuera del rango válido. El cliente se importará sin coordenadas.');
         row.latitude = '';
         row.longitude = '';
       } else {
         // Valid decimal coordinates
         coordinateSource = 'csv';
-        coordinatesUsable = true;
       }
     } else if (hasLat || hasLng) {
-      // Partial decimal coordinates - treat as unusable
+      // Partial decimal coordinates - set NULL
       warnings.push('Solo se proporcionó latitud o longitud. El cliente se importará sin coordenadas.');
       row.latitude = '';
       row.longitude = '';
@@ -575,19 +587,17 @@ async function handleValidation(csvContent: string) {
         row.longitude = dmsResult.longitude.toString();
         coordinateSource = 'csv-dms';
         originalCoordinates = row.coordinates!.trim();
-        coordinatesUsable = true;
       } else {
-        // Failed to parse DMS - treat as unusable
+        // Failed to parse DMS - set NULL
         warnings.push(`Formato de coordenadas no reconocido: ${dmsResult.error || 'formato no soportado'}. El cliente se importará sin coordenadas.`);
+        row.latitude = '';
+        row.longitude = '';
       }
-    }
-
-    // PRIORITY 3: No usable coordinates + valid address = geocoding candidate
-    if (!coordinatesUsable && row.address && row.address.trim()) {
-      rowsNeedingGeocode.push({
-        index,
-        address: row.address.trim(),
-      });
+    } else if (row.address && row.address.trim()) {
+      // Address provided but no coordinates - set NULL (no geocoding)
+      // Coordinates are optional - client can be imported without them
+      row.latitude = '';
+      row.longitude = '';
     }
 
     validationResults.push({
@@ -601,62 +611,13 @@ async function handleValidation(csvContent: string) {
     });
   });
 
-  // PHASE 2: Geocode addresses for rows without coordinates
-  if (rowsNeedingGeocode.length > 0) {
-    const networkChunks = Math.ceil(rowsNeedingGeocode.length / GEOCODE_CONCURRENCY);
+  // PHASE 2: Geocoding REMOVED for performance
+  // Bulk imports no longer perform external geocoding requests
+  // Coordinates are optional - clients can be imported without them
+  // Valid coordinates from CSV (decimal or DMS) are preserved
+  // Invalid/missing coordinates result in NULL (with warnings)
 
-    console.log('[CLIENT-IMPORT-GEOCODE] Starting geocoding phase', {
-      totalRows: validationResults.length,
-      coordinatesProvided: validationResults.length - rowsNeedingGeocode.length,
-      coordinatesMissingWithAddress: rowsNeedingGeocode.length,
-      networkConcurrency: GEOCODE_CONCURRENCY,
-      numberOfNetworkChunks: networkChunks,
-    });
-
-    console.log(`[Import] Geocoding ${rowsNeedingGeocode.length} addresses with max ${GEOCODE_CONCURRENCY} concurrent requests...`);
-
-    const geocodeResults = await processBatch(
-      rowsNeedingGeocode,
-      GEOCODE_CONCURRENCY,
-      async item => {
-        const result = await geocodeAddress(item.address);
-        return { ...item, geocode: result };
-      },
-      true // Enable batch progress logging
-    );
-
-    // Apply geocoding results
-    let geocodingSuccess = 0;
-    let geocodingFailed = 0;
-
-    geocodeResults.forEach(({ index, geocode }) => {
-      const validation = validationResults[index];
-
-      if (geocode.success && geocode.latitude && geocode.longitude) {
-        // Success: update data with geocoded coordinates
-        validation.data.latitude = geocode.latitude.toString();
-        validation.data.longitude = geocode.longitude.toString();
-        validation.coordinateSource = 'geocoded';
-        geocodingSuccess++;
-      } else {
-        // Failed: add WARNING (not error) - client can still be imported
-        // Coordinates are OPTIONAL - client can be created without them
-        validation.warnings.push(
-          `No se pudo geocodificar la dirección (${geocode.error || 'dirección no encontrada'}). El cliente se importará sin coordenadas.`
-        );
-        geocodingFailed++;
-        // isValid remains true - geocoding failure does NOT block import
-      }
-    });
-
-    console.log('[CLIENT-IMPORT-GEOCODE] Geocoding complete', {
-      attempted: rowsNeedingGeocode.length,
-      geocodingSuccess,
-      geocodingFailed,
-    });
-  }
-
-  // PHASE 3: Removed - coordinates are OPTIONAL
+  const validationElapsed = Date.now() - validationStart;
   // Clients can be created without coordinates if:
   // - They were not provided in CSV
   // - Geocoding failed or was not attempted
@@ -669,6 +630,8 @@ async function handleValidation(csvContent: string) {
   const invalidCount = validationResults.length - validCount;
   const validWithWarnings = validationResults.filter(r => r.isValid && r.warnings.length > 0).length;
   const validWithoutWarnings = validCount - validWithWarnings;
+
+  console.log(`[CLIENT-IMPORT][${requestId}] VALIDATION_COMPLETE valid=${validCount} invalid=${invalidCount} warnings=${validWithWarnings} elapsedMs=${validationElapsed}`);
 
   return NextResponse.json({
     success: true,
@@ -683,11 +646,14 @@ async function handleValidation(csvContent: string) {
 }
 
 async function handleAtomicImport(
+  requestId: string,
   supabase: SupabaseClient,
   userId: string,
   importId: string,
   validatedRows: ValidationResult[]
 ) {
+  const importStart = Date.now();
+
   if (!Array.isArray(validatedRows) || validatedRows.length === 0) {
     return NextResponse.json(
       { error: 'No hay registros válidos para importar' },
@@ -925,6 +891,8 @@ async function handleAtomicImport(
       });
     }
 
+    const stagingElapsed = Date.now() - importStart;
+    console.log(`[CLIENT-IMPORT][${requestId}] STAGING_COMPLETE rows=${clientsToStage.length} elapsedMs=${stagingElapsed}`);
     console.log(`[Import] All records staged successfully`);
     console.log('[CLIENT-IMPORT-API-RCA] 9. All staging batches complete', {
       importId,
@@ -1037,6 +1005,9 @@ async function handleAtomicImport(
       importId,
       result: commitResult,
     });
+
+    const totalElapsed = Date.now() - importStart;
+    console.log(`[CLIENT-IMPORT][${requestId}] COMPLETE totalElapsedMs=${totalElapsed} imported=${commitResult.imported}`);
 
     return NextResponse.json({
       success: true,
