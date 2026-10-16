@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import ProtectedLayout from '@/components/ProtectedLayout';
 import Modal from '@/components/ui/Modal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
@@ -15,10 +15,13 @@ type ClientFilter = 'active' | 'inactive' | 'all';
 export default function ClientsPage() {
   const { profile } = useAuth();
   const [clients, setClients] = useState<Client[]>([]);
-  const [filteredClients, setFilteredClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [filter, setFilter] = useState<ClientFilter>('active');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [totalCount, setTotalCount] = useState(0);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -26,9 +29,30 @@ export default function ClientsPage() {
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [error, setError] = useState('');
 
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Debounce search query
+  useEffect(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    debounceTimerRef.current = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+      setCurrentPage(1); // Reset to page 1 when search changes
+    }, 300);
+
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, [searchQuery]);
+
+  // Load clients when pagination params change
   useEffect(() => {
     loadClients();
-  }, []);
+  }, [currentPage, pageSize, filter, debouncedSearchQuery]);
 
   // Auto-open edit modal if edit parameter is present in URL
   useEffect(() => {
@@ -46,49 +70,52 @@ export default function ClientsPage() {
     }
   }, [clients]);
 
-  useEffect(() => {
-    filterClients();
-  }, [clients, searchQuery, filter]);
-
   async function loadClients() {
     try {
       setLoading(true);
-      const { data, error } = await supabase
+      setError('');
+
+      // Build query with filters
+      let query = supabase
         .from('clients')
-        .select('*')
-        .order('created_at', { ascending: false });
+        .select('*', { count: 'exact' });
+
+      // Apply status filter
+      if (filter === 'active') {
+        query = query.eq('is_active', true);
+      } else if (filter === 'inactive') {
+        query = query.eq('is_active', false);
+      }
+
+      // Apply search filter
+      if (debouncedSearchQuery) {
+        const searchTerm = debouncedSearchQuery.toLowerCase();
+        query = query.or(
+          `name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%,address.ilike.%${searchTerm}%`
+        );
+      }
+
+      // Apply pagination
+      const from = (currentPage - 1) * pageSize;
+      const to = from + pageSize - 1;
+
+      query = query
+        .order('created_at', { ascending: false })
+        .range(from, to);
+
+      const { data, error, count } = await query;
 
       if (error) throw error;
+
       setClients(data || []);
+      setTotalCount(count || 0);
     } catch (err: any) {
       setError(err.message);
+      setClients([]);
+      setTotalCount(0);
     } finally {
       setLoading(false);
     }
-  }
-
-  function filterClients() {
-    let filtered = clients;
-
-    // Filter by status
-    if (filter === 'active') {
-      filtered = filtered.filter(c => c.is_active);
-    } else if (filter === 'inactive') {
-      filtered = filtered.filter(c => !c.is_active);
-    }
-
-    // Filter by search
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(
-        c =>
-          c.name.toLowerCase().includes(query) ||
-          c.phone?.toLowerCase().includes(query) ||
-          c.address?.toLowerCase().includes(query)
-      );
-    }
-
-    setFilteredClients(filtered);
   }
 
   function handleCreate() {
@@ -124,6 +151,53 @@ export default function ClientsPage() {
 
   function openInMaps(lat: number, lng: number) {
     window.open(`https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=17/${lat}/${lng}`, '_blank');
+  }
+
+  function handleFilterChange(newFilter: ClientFilter) {
+    setFilter(newFilter);
+    setCurrentPage(1); // Reset to page 1 when filter changes
+  }
+
+  function handlePageSizeChange(newSize: number) {
+    setPageSize(newSize);
+    setCurrentPage(1); // Reset to page 1 when page size changes
+  }
+
+  const totalPages = Math.ceil(totalCount / pageSize);
+  const startRecord = totalCount === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const endRecord = Math.min(currentPage * pageSize, totalCount);
+
+  function renderPaginationNumbers() {
+    const pages: (number | 'ellipsis')[] = [];
+
+    if (totalPages <= 7) {
+      // Show all pages if 7 or fewer
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      // Always show first page
+      pages.push(1);
+
+      if (currentPage <= 3) {
+        // Near start: 1 2 3 4 ... last
+        pages.push(2, 3, 4);
+        pages.push('ellipsis');
+        pages.push(totalPages);
+      } else if (currentPage >= totalPages - 2) {
+        // Near end: 1 ... last-3 last-2 last-1 last
+        pages.push('ellipsis');
+        pages.push(totalPages - 3, totalPages - 2, totalPages - 1, totalPages);
+      } else {
+        // Middle: 1 ... current-1 current current+1 ... last
+        pages.push('ellipsis');
+        pages.push(currentPage - 1, currentPage, currentPage + 1);
+        pages.push('ellipsis');
+        pages.push(totalPages);
+      }
+    }
+
+    return pages;
   }
 
   if (loading) {
@@ -169,7 +243,7 @@ export default function ClientsPage() {
           {(['active', 'inactive', 'all'] as ClientFilter[]).map(f => (
             <button
               key={f}
-              onClick={() => setFilter(f)}
+              onClick={() => handleFilterChange(f)}
               className={`px-4 py-2 rounded-md transition ${
                 filter === f
                   ? 'bg-blue-600 text-white'
@@ -184,88 +258,185 @@ export default function ClientsPage() {
         </div>
       </div>
 
+      <div className="flex items-center gap-3 mb-4">
+        <label className="text-sm text-gray-700 font-medium">
+          Mostrar:
+        </label>
+        <select
+          value={pageSize}
+          onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+          className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          <option value={25}>25</option>
+          <option value={50}>50</option>
+          <option value={100}>100</option>
+        </select>
+        <span className="text-sm text-gray-600">
+          registros por página
+        </span>
+      </div>
+
       {error && (
         <div className="mb-4 p-4 bg-red-50 text-red-600 rounded-md">{error}</div>
       )}
 
-      {filteredClients.length === 0 ? (
+      {clients.length === 0 && !loading ? (
         <div className="text-center py-12 text-gray-500">
           No se encontraron clientes
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Nombre
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Teléfono
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Dirección
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Estado
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                  Acciones
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {filteredClients.map(client => (
-                <tr key={client.id}>
-                  <td className="px-6 py-4 whitespace-nowrap">{client.name}</td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    {client.phone || '-'}
-                  </td>
-                  <td className="px-6 py-4">{client.address || '-'}</td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span
-                      className={`px-2 py-1 rounded-full text-xs ${
-                        client.is_active
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-gray-100 text-gray-800'
-                      }`}
-                    >
-                      {client.is_active ? 'Activo' : 'Inactivo'}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
-                    {hasValidCoordinates(client.latitude, client.longitude) && (
+        <>
+          <div className="bg-white rounded-lg shadow overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    Nombre
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    Teléfono
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    Dirección
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    Estado
+                  </th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                    Acciones
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {clients.map(client => (
+                  <tr key={client.id}>
+                    <td className="px-6 py-4 whitespace-nowrap">{client.name}</td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {client.phone || '-'}
+                    </td>
+                    <td className="px-6 py-4">{client.address || '-'}</td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span
+                        className={`px-2 py-1 rounded-full text-xs ${
+                          client.is_active
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-gray-100 text-gray-800'
+                        }`}
+                      >
+                        {client.is_active ? 'Activo' : 'Inactivo'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
+                      {hasValidCoordinates(client.latitude, client.longitude) && (
+                        <button
+                          onClick={() => openInMaps(client.latitude!, client.longitude!)}
+                          className="text-blue-600 hover:text-blue-900"
+                        >
+                          Ubicación
+                        </button>
+                      )}
                       <button
-                        onClick={() => openInMaps(client.latitude!, client.longitude!)}
+                        onClick={() => handleEdit(client)}
                         className="text-blue-600 hover:text-blue-900"
                       >
-                        Ubicación
+                        Editar
                       </button>
-                    )}
-                    <button
-                      onClick={() => handleEdit(client)}
-                      className="text-blue-600 hover:text-blue-900"
-                    >
-                      Editar
-                    </button>
-                    <button
-                      onClick={() => handleDeactivate(client)}
-                      className={
-                        client.is_active
-                          ? 'text-red-600 hover:text-red-900'
-                          : 'text-green-600 hover:text-green-900'
-                      }
-                    >
-                      {client.is_active ? 'Desactivar' : 'Reactivar'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                      <button
+                        onClick={() => handleDeactivate(client)}
+                        className={
+                          client.is_active
+                            ? 'text-red-600 hover:text-red-900'
+                            : 'text-green-600 hover:text-green-900'
+                        }
+                      >
+                        {client.is_active ? 'Desactivar' : 'Reactivar'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            </div>
           </div>
-        </div>
+
+          {/* Pagination info and controls */}
+          {totalCount > 0 && (
+            <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-4 bg-white px-6 py-4 rounded-lg shadow">
+              {/* Info */}
+              <div className="text-sm text-gray-700">
+                Mostrando <span className="font-medium">{startRecord}</span>–
+                <span className="font-medium">{endRecord}</span> de{' '}
+                <span className="font-medium">{totalCount.toLocaleString()}</span> clientes
+              </div>
+
+              {/* Pagination controls */}
+              {totalPages > 1 && (
+                <div className="flex items-center gap-2">
+                  {/* Previous button */}
+                  <button
+                    onClick={() => setCurrentPage(currentPage - 1)}
+                    disabled={currentPage === 1}
+                    className={`px-3 py-2 text-sm font-medium rounded-md transition ${
+                      currentPage === 1
+                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                        : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
+                    }`}
+                  >
+                    Anterior
+                  </button>
+
+                  {/* Page numbers */}
+                  <div className="hidden sm:flex items-center gap-1">
+                    {renderPaginationNumbers().map((page, index) => {
+                      if (page === 'ellipsis') {
+                        return (
+                          <span
+                            key={`ellipsis-${index}`}
+                            className="px-3 py-2 text-gray-500"
+                          >
+                            ...
+                          </span>
+                        );
+                      }
+                      return (
+                        <button
+                          key={page}
+                          onClick={() => setCurrentPage(page)}
+                          className={`px-3 py-2 text-sm font-medium rounded-md transition ${
+                            currentPage === page
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
+                          }`}
+                        >
+                          {page}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Mobile: current page indicator */}
+                  <div className="sm:hidden text-sm text-gray-700">
+                    <span className="font-medium">{currentPage}</span> / {totalPages}
+                  </div>
+
+                  {/* Next button */}
+                  <button
+                    onClick={() => setCurrentPage(currentPage + 1)}
+                    disabled={currentPage === totalPages}
+                    className={`px-3 py-2 text-sm font-medium rounded-md transition ${
+                      currentPage === totalPages
+                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                        : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
+                    }`}
+                  >
+                    Siguiente
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
 
       <ClientFormModal
@@ -273,6 +444,7 @@ export default function ClientsPage() {
         onClose={() => setIsCreateModalOpen(false)}
         onSuccess={() => {
           setIsCreateModalOpen(false);
+          setCurrentPage(1); // Reset to first page to see new client
           loadClients();
         }}
       />
@@ -282,7 +454,7 @@ export default function ClientsPage() {
         onClose={() => setIsEditModalOpen(false)}
         onSuccess={() => {
           setIsEditModalOpen(false);
-          loadClients();
+          loadClients(); // Reload current page to see changes
         }}
         client={selectedClient}
       />
