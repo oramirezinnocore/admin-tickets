@@ -10,6 +10,8 @@ import LoadingSkeleton from '@/components/ui/LoadingSkeleton';
 import Modal from '@/components/ui/Modal';
 import Combobox from '@/components/ui/Combobox';
 import type { ComboboxOption } from '@/components/ui/Combobox';
+import AsyncCombobox from '@/components/ui/AsyncCombobox';
+import type { AsyncComboboxOption } from '@/components/ui/AsyncCombobox';
 import { supabase } from '@/lib/supabase';
 import {
   Ticket,
@@ -567,7 +569,7 @@ interface CreateTicketModalProps {
 }
 
 function CreateTicketModal({ isOpen, onClose, onSuccess }: CreateTicketModalProps) {
-  const [clients, setClients] = useState<Client[]>([]);
+  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [technicians, setTechnicians] = useState<(Technician & { profile: Profile })[]>([]);
   const [formData, setFormData] = useState({
     client_id: '',
@@ -580,8 +582,8 @@ function CreateTicketModal({ isOpen, onClose, onSuccess }: CreateTicketModalProp
 
   useEffect(() => {
     if (isOpen) {
-      loadClients();
       loadTechnicians();
+      setSelectedClient(null);
       setFormData({
         client_id: '',
         failure_type: '',
@@ -592,13 +594,48 @@ function CreateTicketModal({ isOpen, onClose, onSuccess }: CreateTicketModalProp
     }
   }, [isOpen]);
 
-  async function loadClients() {
-    const { data } = await supabase
-      .from('clients')
-      .select('*')
-      .eq('is_active', true)
-      .order('name');
-    setClients(data || []);
+  async function searchClients(query: string): Promise<AsyncComboboxOption[]> {
+    try {
+      let supabaseQuery = supabase
+        .from('clients')
+        .select('*')
+        .eq('is_active', true);
+
+      // Apply search filter if query provided
+      if (query.trim()) {
+        const searchTerm = query.trim();
+        supabaseQuery = supabaseQuery.or(
+          `name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%,address.ilike.%${searchTerm}%`
+        );
+      }
+
+      // Limit results to reasonable number
+      const { data } = await supabaseQuery
+        .order('name')
+        .limit(25);
+
+      const clients = data || [];
+
+      return clients.map(client => ({
+        value: client.id,
+        label: client.name,
+        secondaryText: [client.phone, client.address].filter(Boolean).join(' · '),
+      }));
+    } catch (err) {
+      console.error('Error searching clients:', err);
+      return [];
+    }
+  }
+
+  function handleClientSelect(clientId: string, option: AsyncComboboxOption) {
+    setFormData({ ...formData, client_id: clientId });
+    // Store selected client for display (construct from option data)
+    setSelectedClient({
+      id: clientId,
+      name: option.label,
+      // Note: We don't have full client data here, but we have enough for display
+      // The actual client_id is what matters for ticket creation
+    } as Client);
   }
 
   async function loadTechnicians() {
@@ -609,17 +646,6 @@ function CreateTicketModal({ isOpen, onClose, onSuccess }: CreateTicketModalProp
       .order('created_at');
     setTechnicians((data as any) || []);
   }
-
-  const clientOptions: ComboboxOption[] = useMemo(
-    () =>
-      clients.map(client => ({
-        value: client.id,
-        label: client.name,
-        searchText: `${client.name} ${client.phone || ''} ${client.address || ''}`,
-        secondaryText: [client.phone, client.address].filter(Boolean).join(' · '),
-      })),
-    [clients]
-  );
 
   const technicianOptions: ComboboxOption[] = useMemo(() => {
     const opts: ComboboxOption[] = [
@@ -702,15 +728,18 @@ function CreateTicketModal({ isOpen, onClose, onSuccess }: CreateTicketModalProp
           <div className="p-3 bg-red-50 border border-red-200 text-red-600 rounded-lg text-sm">{error}</div>
         )}
 
-        <Combobox
+        <AsyncCombobox
           label="Cliente"
           required
           placeholder="Seleccionar cliente"
           searchPlaceholder="Buscar por nombre, teléfono o dirección..."
           value={formData.client_id}
-          options={clientOptions}
-          onChange={value => setFormData({ ...formData, client_id: value })}
+          selectedLabel={selectedClient?.name}
+          selectedSecondary={selectedClient ? [selectedClient.phone, selectedClient.address].filter(Boolean).join(' · ') : undefined}
+          onSearch={searchClients}
+          onChange={handleClientSelect}
           emptyMessage="No se encontraron clientes"
+          loadingMessage="Buscando clientes..."
         />
 
         <div>
